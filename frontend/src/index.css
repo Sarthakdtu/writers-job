@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    /* Sepia Parchment (Light default) */
+    --bg-base: #f7f2e7;
+    --bg-panel: #fcf9f2;
+    --bg-card: #ffffff;
+    --bg-hover: #ede4d3;
+    --border-color: #e2d7c3;
+    --border-subtle: #ebd8bd;
+    --text-main: #3b2d24;
+    --text-muted: #786455;
+    --text-dim: #a38f7d;
+    --accent: #8c5a32;
+    --accent-hover: #734624;
+    --accent-light: #f3e9db;
+    --shadow-color: rgba(59, 45, 36, 0.08);
+    --font-prose: 'Lora', 'EB Garamond', Georgia, serif;
+    --font-ui: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  html[data-theme="midnight"] {
+    /* Midnight Ink (Dark Mode) */
+    --bg-base: #0a0f1d;
+    --bg-panel: #111827;
+    --bg-card: #1f293d;
+    --bg-hover: #28354e;
+    --border-color: #2e3c54;
+    --border-subtle: #1e293b;
+    --text-main: #f1f5f9;
+    --text-muted: #94a3b8;
+    --text-dim: #64748b;
+    --accent: #38bdf8;
+    --accent-hover: #0284c7;
+    --accent-light: #1e293b;
+    --shadow-color: rgba(0, 0, 0, 0.4);
+  }
+
+  html[data-theme="typewriter"] {
+    /* Typewriter Minimal (Monochrome High Contrast) */
+    --bg-base: #121212;
+    --bg-panel: #1a1a1a;
+    --bg-card: #242424;
+    --bg-hover: #2e2e2e;
+    --border-color: #383838;
+    --border-subtle: #2a2a2a;
+    --text-main: #f4f4f5;
+    --text-muted: #a1a1aa;
+    --text-dim: #71717a;
+    --accent: #e4e4e7;
+    --accent-hover: #ffffff;
+    --accent-light: #27272a;
+    --shadow-color: rgba(0, 0, 0, 0.5);
+    --font-prose: 'EB Garamond', 'Lora', serif;
+  }
+}
+
+body {
+  background-color: var(--bg-base);
+  color: var(--text-main);
+  font-family: var(--font-ui);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.font-prose {
+  font-family: var(--font-prose);
+}
+
+.font-ui {
+  font-family: var(--font-ui);
+}
+
+/* Custom Literary Parchment & Midnight Glassmorphism Effects */
+.glass-panel {
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 20px var(--shadow-color);
+}
+
+.literary-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 2px 8px var(--shadow-color);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.literary-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 6px 16px var(--shadow-color);
+}
+
+/* Scrollbar styles */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-base);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
