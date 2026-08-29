@@ -13,6 +13,8 @@ update the relevant section(s) in AGENTS.md.
     sidebar): quote cards with note + tag chips, search, add/edit modal with quick-add tag
     suggestions from characters and books. Registered in `App.jsx` (`'quotes'` case) and
     `Sidebar.jsx` `NAV_ITEMS`.
+  - `DashboardView` now merges character quotes + standalone quotes in the **Memorable
+    Quotes** section; standalone quotes show their note (if any) and tags.
   - First portrait image of a character is now auto-added to the character's `gallery` on
     save when the gallery is empty (`CharacterRosterView.handleSaveCharacter`).
 
@@ -28,6 +30,35 @@ update the relevant section(s) in AGENTS.md.
     default/ocr/vision/router model ids, error hint). `running_jobs`/`queued_jobs` fixed
     at 0 until Phase 1.
   - `plans/ollama-ai-skills.md` is the design source of truth (phases 0–7, gated).
+
+- **2026-08-29 — Ollama AI full backend (Phases 1, 2, 4, 5, 6).**
+  - `ai/schemas.py` expanded: `PipelineSummary`, `AIConfig`, `RunInput`/`RunRequest`,
+    `AIJob`, `AIResult`, `CustomSkillPayload`, `RoutingBlock`, `CustomSkill`,
+    `RouterRequest`, `RouterDecision`.
+  - `ai/pipelines.py`: full registry — 18 analysis + 3 import pipelines (`PipelineDef`,
+    `StepSpec`).
+  - `ai/prompts.py`: `SYSTEM_PREFIXES`, `TASKS` for all pipelines, `STAGE_LABELS`,
+    `ROUTER_SYSTEM`, `step_messages` helper.
+  - `ai/context.py`: 18 context builders + `SOURCE_BUILDERS` + `build_context_from_sources`
+    with budget/drop logic and "sampled N" notes.
+  - `ai/store.py`: `AiStore` — per-story `ai/{config.json,jobs/,results/}` persistence.
+  - `ai/custom.py`: async custom skill CRUD + duplicate + auto-routing (`route_skill`).
+  - `ai/router.py`: Context Router — LLM routing (format=json, temp=0, think=false) +
+    keyword fallback; `route_skill` returns `RouterDecision` with `routed_by` badge.
+  - `ai/jobs.py`: `JobManager` — per-story FIFO queue, one runner per story, cancel,
+    `recover_interrupted` startup hook, per-step model resolution via story config
+    overrides, image staging.
+  - Routes in `main.py`: `POST /api/ai/run` (202), `GET/POST /api/ai/jobs/...`,
+    `POST /api/ai/jobs/{id}/cancel`, `GET /api/ai/results/{id}/{pipeline}`,
+    `GET/PUT /api/ai/config/{id}`, `GET /api/ai/pipelines?tab=`,
+    `GET/POST/PUT/DELETE /api/ai/custom`, `POST /api/ai/custom/{id}/duplicate`,
+    `POST /api/ai/custom/route` (dry-run).
+  - Startup hook: `lifespan` calls `recover_interrupted`.
+  - Offline handling: `POST /api/ai/run` → 503 when Ollama unreachable.
+  - Verified: end-to-end run (story_overview → 3k markdown), queue/cancel, config,
+    custom skill CRUD + router dry-run, OCR pipeline enqueue.
+  - **Known latency**: qwen3.5:9b ~20s/completion on this hardware; router LLM-first
+    design makes skill creation slow — use `OLLAMA_ROUTER_MODEL` for a faster model.
 
 - **2026-08-29 — Character quotes + story-board showcase.**
   - `Character` gained `quotes: List[str]` (schema). `CharacterRosterView` has a new **Quotes**

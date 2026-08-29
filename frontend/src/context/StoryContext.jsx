@@ -12,6 +12,7 @@ export const StoryProvider = ({ children }) => {
   const [focusMode, setFocusMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [quickSearchOpen, setQuickSearchOpen] = useState(false);
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // Fetch stories on load
@@ -53,15 +54,21 @@ export const StoryProvider = ({ children }) => {
         e.preventDefault();
         setQuickSearchOpen((prev) => !prev);
       }
+      // Ctrl+Shift+A or Cmd+Shift+A -> Toggle AI Panel
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
+        e.preventDefault();
+        setAiPanelOpen((prev) => !prev);
+      }
       // Escape -> Exit Focus Mode or close Quick Search
       if (e.key === 'Escape') {
         if (quickSearchOpen) setQuickSearchOpen(false);
+        if (aiPanelOpen) setAiPanelOpen(false);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [quickSearchOpen]);
+  }, [quickSearchOpen, aiPanelOpen]);
 
   const selectStory = (storyId) => {
     const found = stories.find((s) => s.id === storyId);
@@ -141,6 +148,8 @@ export const StoryProvider = ({ children }) => {
         setSidebarOpen,
         quickSearchOpen,
         setQuickSearchOpen,
+        aiPanelOpen,
+        setAiPanelOpen,
         loading,
       }}
     >

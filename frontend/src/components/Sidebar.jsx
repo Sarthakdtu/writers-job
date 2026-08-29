@@ -9,7 +9,8 @@ import {
   Quote,
   ChevronLeft,
   ChevronRight,
-  BookOpen
+  BookOpen,
+  Bot
 } from 'lucide-react';
 import { useStory } from '../context/StoryContext';
 
@@ -21,6 +22,7 @@ export const NAV_ITEMS = [
   { id: 'outliner', label: 'Book Outliner', icon: GitFork, desc: 'Beats, arcs, scene breakdowns' },
   { id: 'editor', label: 'Draft Editor', icon: FileText, desc: 'Dual-mode Markdown & Google Docs' },
   { id: 'quotes', label: 'Quotes', icon: Quote, desc: 'Memorable lines, notes & tags' },
+  { id: 'ai', label: 'Skill Studio', icon: Bot, desc: 'Custom skills & AI pipelines' },
 ];
 
 export const Sidebar = () => {

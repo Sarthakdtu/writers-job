@@ -9,7 +9,8 @@ import {
   Tag,
   Check,
   ChevronDown,
-  Maximize2
+  Maximize2,
+  Bot
 } from 'lucide-react';
 import { useStory } from '../context/StoryContext';
 import { useTheme } from '../context/ThemeContext';
@@ -24,7 +25,9 @@ export const Navbar = ({ onOpenBackupModal }) => {
     setSelectedTag,
     availableTags,
     setQuickSearchOpen,
-    setFocusMode
+    setFocusMode,
+    aiPanelOpen,
+    setAiPanelOpen
   } = useStory();
 
   const { theme, setTheme, THEMES } = useTheme();
@@ -202,6 +205,17 @@ export const Navbar = ({ onOpenBackupModal }) => {
             <span className="rounded-full bg-emerald-400/30 px-1.5 py-0.5 text-[9px] font-bold text-white uppercase tracking-wider">
               In Sync
             </span>
+          </button>
+
+          {/* AI Panel Toggle with Status Dot */}
+          <button
+            onClick={() => setAiPanelOpen((prev) => !prev)}
+            className="flex items-center gap-1.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-color)] px-3 py-1.5 text-xs font-semibold text-[var(--text-main)] hover:border-[var(--accent)] hover:bg-[var(--accent-light)] transition-all shadow-xs"
+            title="AI Assistant (Ctrl+Shift+A)"
+          >
+            <Bot className="h-3.5 w-3.5 text-[var(--accent)]" />
+            <span className="hidden sm:inline">AI</span>
+            <span className={`relative h-2 w-2 rounded-full ${aiPanelOpen ? 'bg-emerald-400' : 'bg-[var(--text-dim)]'}`} />
           </button>
 
           {/* Distraction-Free Focus Mode Hotkey Toggle */}

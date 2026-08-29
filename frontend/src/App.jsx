@@ -5,6 +5,7 @@ import { Navbar } from './components/Navbar';
 import { Sidebar } from './components/Sidebar';
 import { AmbientBackground } from './components/AmbientBackground';
 import { QuickSearchModal } from './components/QuickSearchModal';
+import { AIPanel } from './components/AIPanel';
 import { Minimize2, Feather } from 'lucide-react';
 
 // Main Application Content Switcher placeholder modules
@@ -18,7 +19,7 @@ import { QuotesView } from './components/modules/QuotesView';
 import { GoogleDriveModal } from './components/GoogleDriveModal';
 
 const MainLayout = () => {
-  const { activeTab, focusMode, setFocusMode } = useStory();
+  const { activeTab, focusMode, setFocusMode, aiPanelOpen, setAiPanelOpen } = useStory();
   const [showBackupModal, setShowBackupModal] = useState(false);
 
   const renderActiveModule = () => {
@@ -83,6 +84,9 @@ const MainLayout = () => {
 
       {/* Google Drive Sync Modal */}
       {showBackupModal && <GoogleDriveModal onClose={() => setShowBackupModal(false)} />}
+
+      {/* AI Assistant Panel (Ctrl+Shift+A) */}
+      <AIPanel isOpen={aiPanelOpen} onClose={() => setAiPanelOpen(false)} />
     </div>
   );
 };

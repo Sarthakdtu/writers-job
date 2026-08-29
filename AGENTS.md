@@ -56,8 +56,15 @@ writer_job/
 │       │   ├── config.py     ← OLLAMA_* env settings
 │       │   ├── ollama.py     ← Generic async Ollama client (capabilities, health, complete)
 │       │   ├── io.py         ← Image ref → base64 prep (validation + traversal guard)
-│       │   ├── schemas.py    ← AIStatus, ModelInfo
-│       │   ├── prompts.py    ← Shared prompt fragments
+│       │   ├── schemas.py    ← AIStatus, ModelInfo, AIConfig, AIJob, AIResult, PipelineSummary,
+│       │                       CustomSkill, RouterRequest, RouterDecision
+│       │   ├── prompts.py    ← SYSTEM_PREFIXES, TASKS, STAGE_LABELS, ROUTER_SYSTEM, step_messages
+│       │   ├── pipelines.py  ← PipelineDef registry: 18 analysis + 3 import pipelines
+│       │   ├── context.py    ← 18 context builders + build_context_from_sources (budget/drop)
+│       │   ├── store.py      ← AiStore: per-story ai/{config.json,jobs/,results/}
+│       │   ├── custom.py     ← Custom skill CRUD + duplicate + auto-routing
+│       │   ├── router.py     ← Context Router (LLM + keyword fallback)
+│       │   ├── jobs.py       ← JobManager: FIFO queue, cancel, recover_interrupted
 │       │   └── __init__.py
 │       └── __init__.py
 ├── frontend/
@@ -80,9 +87,9 @@ writer_job/
 │           ├── ArtifactFormModal.jsx   ← shared artifact create/edit modal
 │           └── modules/
 │               ├── HomeView.jsx             ← Home page: all-stories gallery, tags, New Story
-│               ├── DashboardView.jsx        ← Per-story dashboard: overview, fun-facts, theme
+│               ├── DashboardView.jsx        ← Per-story dashboard: overview, fun-facts, theme, memorable quotes (character + standalone)
 │               ├── WorldbuildingView.jsx    ← Tabbed: cities/mechanics/factions/artifacts/glossary/gallery
-│               ├── CharacterRosterView.jsx  ← Roster, gallery, artifacts, appearances, timeline
+│               ├── CharacterRosterView.jsx  ← Roster, gallery, artifacts, appearances, timeline (first portrait auto-added to gallery)
 │               ├── BookOutlinerView.jsx     ← Book/chapter tree, plot beats, arcs, POV tracker
 │               ├── QuotesView.jsx           ← Standalone quotes (text + note + tags) tab
 │               └── DraftEditorView.jsx      ← Markdown + Google Docs dual mode, autosave
@@ -249,9 +256,19 @@ REST endpoints in `main.py`. The frontend calls these via the Vite dev proxy. Su
   - `GET /api/backup/status` — returns in-memory `_backup_status` dict
   - `POST /api/backup/google-drive?story_id=` — recursive backup
 - **Local AI (Ollama):**
-  - `GET /api/ai/status` → `AIStatus` (available, models w/ capabilities,
-    default/ocr/vision/router models, error hint). More `/api/ai/*` routes come with the
-    phases in `plans/ollama-ai-skills.md` (jobs, pipelines, skill studio, router).
+   - `GET /api/ai/status` → `AIStatus` (available, models w/ capabilities,
+     default/ocr/vision/router models, error hint, running_jobs, queued_jobs).
+   - `GET /api/ai/pipelines?story_id=&tab=` — list pipelines (built-in + custom) with enable flags from config.
+   - `GET/PUT /api/ai/config/{story_id}` — per-story model overrides + enabled_skills list.
+   - `POST /api/ai/run` (202) — enqueue a pipeline run (`RunRequest`: story_id, skill, input).
+   - `GET /api/ai/jobs/{story_id}` — list jobs for a story.
+   - `GET /api/ai/jobs/{story_id}/{job_id}` — get job status.
+   - `POST /api/ai/jobs/{job_id}/cancel?story_id=` — cancel pending/running job.
+   - `GET /api/ai/results/{story_id}/{pipeline}` — get stored result for a pipeline.
+   - `GET/POST /api/ai/custom` — list / create custom skill (routes via Context Router).
+   - `PUT/DELETE /api/ai/custom/{skill_id}` — update / delete custom skill (purges from all story configs).
+   - `POST /api/ai/custom/{skill_id}/duplicate` — duplicate a custom skill.
+   - `POST /api/ai/custom/route` — dry-run router (returns `RouterDecision` with `routed_by` badge).
 
 **Backup note:** The current `POST /api/backup/google-drive` implementation only counts
 files and simulates Drive sync; it sets `_backup_status` in **module-level memory**
@@ -281,9 +298,26 @@ files and simulates Drive sync; it sets `_backup_status` in **module-level memor
 - `io.py`: `prepare_images(fm, story_id, refs)` → base64 list; raises 400 with
   `{bad_images, reason}`. Rejects non-image extensions, >8MB files, `..`
   traversal, other-story refs, and >`OLLAMA_MAX_IMAGES_PER_RUN` count.
+- `schemas.py`: `AIStatus`, `ModelInfo`, `AIConfig`, `RunInput`/`RunRequest`,
+  `AIJob`, `AIResult`, `PipelineSummary`, `CustomSkillPayload`, `RoutingBlock`,
+  `CustomSkill`, `RouterRequest`, `RouterDecision`.
+- `prompts.py`: `SYSTEM_PREFIXES`, `TASKS` for all 21 pipelines, `STAGE_LABELS`,
+  `ROUTER_SYSTEM`, `step_messages` helper.
+- `pipelines.py`: `PipelineDef` registry — 18 analysis + 3 import pipelines.
+- `context.py`: 18 context builders + `SOURCE_BUILDERS` + `build_context_from_sources`
+  with budget/drop logic and "sampled N" notes.
+- `store.py`: `AiStore` — per-story `ai/{config.json,jobs/,results/}` persistence.
+- `custom.py`: async custom skill CRUD + duplicate + auto-routing (`route_skill`).
+- `router.py`: Context Router — LLM routing (format=json, temp=0, think=false) +
+  keyword fallback; `route_skill` returns `RouterDecision` with `routed_by` badge.
+- `jobs.py`: `JobManager` — per-story FIFO queue, one runner per story, cancel,
+  `recover_interrupted` startup hook, per-step model resolution via story config
+  overrides, image staging.
 - `qwen3.5:9b` is a **reasoning model**: `content` is empty while thinking is in
   progress, and `message.thinking` holds the chain. Keep `num_predict` generous (or
   unset) and rely on `options.think=false` only when you want reasoning off.
+- **Known latency**: on this hardware qwen3.5:9b takes ~20s/completion; LLM-first
+  router makes skill creation slow. Use `OLLAMA_ROUTER_MODEL` to point to a faster model.
 
 ---
 

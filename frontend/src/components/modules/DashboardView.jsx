@@ -38,6 +38,9 @@ export const DashboardView = () => {
   // Character quotes (from all characters in the cast)
   const [characterQuotes, setCharacterQuotes] = useState([]);
 
+  // Standalone quotes (from Quotes tab)
+  const [standaloneQuotes, setStandaloneQuotes] = useState([]);
+
   const loadFunFacts = useCallback(async () => {
     if (!activeStory) return;
     try {
@@ -67,6 +70,19 @@ export const DashboardView = () => {
     }
   }, [activeStory?.id]);
 
+  const loadStandaloneQuotes = useCallback(async () => {
+    if (!activeStory) return;
+    try {
+      const res = await fetch(`/api/stories/${activeStory.id}/quotes`);
+      if (res.ok) {
+        const quotes = await res.json();
+        setStandaloneQuotes(quotes);
+      }
+    } catch (err) {
+      console.error('Failed to load standalone quotes:', err);
+    }
+  }, [activeStory?.id]);
+
   useEffect(() => {
     loadFunFacts();
   }, [loadFunFacts]);
@@ -75,7 +91,17 @@ export const DashboardView = () => {
     loadCharacterQuotes();
   }, [loadCharacterQuotes]);
 
+  useEffect(() => {
+    loadStandaloneQuotes();
+  }, [loadStandaloneQuotes]);
+
   const overview = activeStory?.overview || [];
+
+  // Merge character quotes and standalone quotes for display
+  const allQuotes = [
+    ...characterQuotes.map((q) => ({ ...q, source: 'character' })),
+    ...standaloneQuotes.map((q) => ({ quote: q.text, character: q.note ? `— ${q.note}` : '— (Standalone)', note: q.note, tags: q.tags, source: 'standalone' })),
+  ];
 
   const handleAddOverview = async () => {
     if (!activeStory || !overviewDraft.trim()) return;
@@ -276,25 +302,34 @@ export const DashboardView = () => {
         <div className="flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] pb-3">
           <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
             <Quote className="h-3.5 w-3.5 text-[var(--accent)]" />
-            Memorable Quotes ({characterQuotes.length})
+            Memorable Quotes ({allQuotes.length})
           </span>
         </div>
 
-        {characterQuotes.length === 0 ? (
+        {allQuotes.length === 0 ? (
           <p className="text-xs italic text-[var(--text-dim)]">
-            No quotes saved yet. Add memorable lines to your characters and they'll appear here.
+            No quotes saved yet. Add memorable lines to your characters or the Quotes tab and they'll appear here.
           </p>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {characterQuotes.map((q, idx) => (
+            {allQuotes.map((q, idx) => (
               <div key={idx} className="relative rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)] p-4 pr-5">
                 <Quote className="absolute top-3 left-3 h-4 w-4 text-[var(--accent)]/40" />
                 <p className="pl-6 font-prose text-sm italic text-[var(--text-main)] leading-relaxed">
                   "{q.quote}"
                 </p>
                 <div className="mt-2 pl-6 text-xs font-semibold text-[var(--accent)] font-mono">
-                  — {q.character}
+                  {q.character}
                 </div>
+                {q.tags && q.tags.length > 0 && (
+                  <div className="mt-2 pl-6 flex flex-wrap gap-1">
+                    {q.tags.map((tag) => (
+                      <span key={tag} className="text-[10px] font-medium text-[var(--text-dim)] bg-[var(--bg-hover)] px-1.5 py-0.5 rounded">
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
