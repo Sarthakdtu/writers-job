@@ -1,5 +1,7 @@
 data/*
 .DS_Store
 .node/
-__pycache__/
-.venv
+node_modules/
+**/__pycache__/
+.venv/
+.package-lock.json
