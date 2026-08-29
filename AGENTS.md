@@ -6,7 +6,7 @@ existing architecture, data model, and conventions.
 
 > **IMPORTANT — KEEP THIS FILE UP TO DATE.** Whenever you change the code in a way that
 > affects functionality, behavior, data shapes, routes, or file layout, update the
-> relevant sections below in the same change (or add a CHANGELOG entry at the bottom).
+> relevant sections below in the same change (or add a CHANGELOG entry in [CHANGELOG.md]).
 > A model that later reads this file must be able to act correctly without re-deriving
 > everything from source.
 
@@ -42,6 +42,7 @@ a FastAPI backend through REST endpoints; the backend reads/writes files atomica
 ```
 writer_job/
 ├── AGENTS.md                 ← YOU ARE HERE (knowledge base / conventions)
+├── CHANGELOG.md              ← Dated codebase-knowledge update log (moved out of AGENTS.md)
 ├── walkthrough.md            ← Original project walkthrough (architecture diagram + overview)
 ├── requirements.txt          ← Python backend dependencies
 ├── plans/                    ← Design drafts (e.g. telegram-integration.md) — NOT implemented code
@@ -51,6 +52,13 @@ writer_job/
 │       ├── file_manager.py   ← FileManager: all filesystem read/write logic per feature
 │       ├── file_utils.py     ← Low-level atomic + thread-safe JSON/text/delete helpers
 │       ├── schemas.py        ← All Pydantic models (Story, Character, World, Book, Chapter, ...)
+│       ├── ai/               ← Local Ollama integration (see §4.5)
+│       │   ├── config.py     ← OLLAMA_* env settings
+│       │   ├── ollama.py     ← Generic async Ollama client (capabilities, health, complete)
+│       │   ├── io.py         ← Image ref → base64 prep (validation + traversal guard)
+│       │   ├── schemas.py    ← AIStatus, ModelInfo
+│       │   ├── prompts.py    ← Shared prompt fragments
+│       │   └── __init__.py
 │       └── __init__.py
 ├── frontend/
 │   ├── package.json          ← React/Vite deps; scripts: dev, build, lint, preview
@@ -71,10 +79,12 @@ writer_job/
 │           ├── GoogleDriveModal.jsx    ← backup status + trigger sync
 │           ├── ArtifactFormModal.jsx   ← shared artifact create/edit modal
 │           └── modules/
-│               ├── DashboardView.jsx        ← Story cards grid, bg URL picker, tags
+│               ├── HomeView.jsx             ← Home page: all-stories gallery, tags, New Story
+│               ├── DashboardView.jsx        ← Per-story dashboard: overview, fun-facts, theme
 │               ├── WorldbuildingView.jsx    ← Tabbed: cities/mechanics/factions/artifacts/glossary/gallery
 │               ├── CharacterRosterView.jsx  ← Roster, gallery, artifacts, appearances, timeline
 │               ├── BookOutlinerView.jsx     ← Book/chapter tree, plot beats, arcs, POV tracker
+│               ├── QuotesView.jsx           ← Standalone quotes (text + note + tags) tab
 │               └── DraftEditorView.jsx      ← Markdown + Google Docs dual mode, autosave
 ├── data/
 │   └── stories/
@@ -96,22 +106,27 @@ All request/response bodies are typed with Pydantic v2 models. The core entities
 
 - **`Story`** — `id` (slug), `title`, `tags[]`, `background_url`,
   `background_images[]` (list of image URLs — local asset URLs or external URLs,
-  used by the Dashboard for add/remove + random-on-refresh), `theme`
+  used by the Home gallery for add/remove + random-on-refresh), `theme`
   (`"sepia"|"midnight"|"paper"`), `aesthetic_theme`, `background_path`,
-  `google_doc_ids{}`.
-- **`Character`** — `id`, `name`, `image_url`, `role`, `bio`, `notes[]`, `gallery[]`,
+  `google_doc_ids{}`, `overview[]` (list of paragraphs edited on the per-story
+  dashboard, mirroring character `notes`).
+- **`Character`** — `id`, `name`, `image_url`, `role`, `location` (home/origin location where the
+  character is from), `bio`, `notes[]`, `quotes[]` (memorable lines, shown on the story
+  dashboard), `gallery[]`,
   `artifact_ids[]`, `timeline_events[]` (`TimelineEvent`: `year_or_era`, `title`,
   `description`, `book_ids[]`), `plot_point_ids[]`.
 - **`WorldMechanics`** — `magic_system`, `technology_level`, `global_rules[]`.
-- **`City`** — `id`, `name`, `region`, `atmosphere`, `key_locations[]`.
+- **`City`** — `id`, `name`, `region`, `atmosphere`, `image_url`, `key_locations[]`.
 - **`Faction`** — `id`, `name`, `description`, `leader`, `alignment`.
 - **`Artifact`** — `id`, `name`, `type`, `properties`, `location`, `image_url`,
   `belongs_to[]` (character ids), `timeline[]` (TimelineEvent).
 - **`GlossaryTerm`** — `id`, `term`, `definition`, `category`.
+- **`Quote`** — `id`, `text`, `note` (short context note), `tags[]` (book/chapter/character
+  or free-form). Standalone quotes, independent of characters.
 - **`GalleryItem`** — `id`, `title`, `image_url`, `context`, `category`, `tags[]`.
   (Concept-art items. `tags[]` make entries searchable in the gallery tab.)
 - **`StoryImageItem`** — unified image-library entry for the gallery tab:
-  `source` (`"gallery"|"character"`), `id`, `title`, `image_url`, `context`, `category`,
+  `source` (`"gallery"|"city"|"character"`), `id`, `title`, `image_url`, `context`, `category`,
   `tags[]`, `character_id`, `character_name`.
 - **`Book`** — `id`, `title`, `order`, `target_word_count`, `plot_subsections[]`
   (`PlotSubsection`: `title`, `description`), `google_doc_url`.
@@ -140,7 +155,8 @@ Every story lives at `data/stories/<story-slug>/`:
 │   ├── factions.json               # [] of Faction
 │   ├── artifacts.json              # [] of Artifact
 │   ├── glossary.json               # [] of GlossaryTerm
-│   └── gallery.json                # [] of GalleryItem
+│   ├── gallery.json                # [] of GalleryItem
+│   └── quotes.json                 # [] of Quote (standalone, tagged)
 └── books/
     └── book-<book-id>/
         ├── book.json               # The Book object
@@ -190,7 +206,8 @@ arcs, chapters/prose). Key behaviors to maintain:
   character POST/PUT/DELETE, after world PUT for the `gallery` section, and inside
   `list_stories` (so existing stories are backfilled on every story-list fetch).
 - `get_image_library(story_id)` builds the unified tagged library returned by
-  `GET /api/stories/{id}/images/library` (gallery items + character portraits/gallery).
+  `GET /api/stories/{id}/images/library` (gallery items + city images + character
+  portraits/gallery).
 - `get_story_dir(slug)` = `base_data_dir / slug` (`base_data_dir` defaults to
   `DATA_DIR` env or `data/stories`).
 - `get_book_dir(slug, book_id)` = `.../books/book-<book_id>`.
@@ -210,9 +227,15 @@ REST endpoints in `main.py`. The frontend calls these via the Vite dev proxy. Su
   `GET/PUT/DELETE .../characters/{char_id}`,
   `GET .../characters/{char_id}/appearances`
 - **World:** `GET/PUT /api/stories/{id}/world/{section}` (section is
-  `cities|mechanics|factions|artifacts|glossary|gallery`).
+  `cities|mechanics|factions|artifacts|glossary|gallery`). Note `quotes` uses its own
+  dedicated routes below.
+- **Quotes:** `GET /api/stories/{id}/quotes` (list), `POST .../quotes` (upsert full array
+  of `Quote`). Standalone, independent of characters; tagged with book/chapter/character.
 - **Image library:** `GET /api/stories/{id}/images/library` → unified tagged image library
-  (gallery items + character images) for the searchable gallery tab.
+  (gallery items + city/location images + character images) for the searchable gallery tab.
+- **Fun facts:** `GET /api/stories/{id}/fun-facts` → `List[str]` of randomizable summary facts
+  (counts/spotlights for characters, factions, cities, artifacts, glossary, books, chapters,
+  word count, world mechanics). Used by the dashboard's "Summary · Fun Fact" shuffle card.
 - **Books:** `GET/POST /api/stories/{id}/books`,
   `GET/PUT/DELETE .../books/{book_id}`,
   `GET/PUT/POST .../books/{book_id}/plot`,
@@ -225,6 +248,10 @@ REST endpoints in `main.py`. The frontend calls these via the Vite dev proxy. Su
   - `GET /api/auth/google` — OAuth flow init
   - `GET /api/backup/status` — returns in-memory `_backup_status` dict
   - `POST /api/backup/google-drive?story_id=` — recursive backup
+- **Local AI (Ollama):**
+  - `GET /api/ai/status` → `AIStatus` (available, models w/ capabilities,
+    default/ocr/vision/router models, error hint). More `/api/ai/*` routes come with the
+    phases in `plans/ollama-ai-skills.md` (jobs, pipelines, skill studio, router).
 
 **Backup note:** The current `POST /api/backup/google-drive` implementation only counts
 files and simulates Drive sync; it sets `_backup_status` in **module-level memory**
@@ -236,6 +263,27 @@ files and simulates Drive sync; it sets `_backup_status` in **module-level memor
 - `DATA_DIR` — base data directory (default `data/stories`).
 - `GOOGLE_CLIENT_SECRET_PATH` — path to `client_secret.json` for OAuth (default
   `client_secret.json`).
+- Ollama AI settings (defaults in parentheses): `OLLAMA_BASE_URL`
+  (`http://localhost:11434`), `OLLAMA_DEFAULT_MODEL` (`qwen3.5:9b`),
+  `OLLAMA_OCR_MODEL` (`glm-ocr:latest`), `OLLAMA_VISION_MODEL` (`minicpm-v:latest`),
+  `OLLAMA_ROUTER_MODEL` (`defaults to OLLAMA_DEFAULT_MODEL`), `OLLAMA_TIMEOUT_S` (`300`),
+  `OLLAMA_CONTEXT_BUDGET_CHARS` (`40000`), `OLLAMA_TEMPERATURE` (`0.2`),
+  `OLLAMA_MAX_IMAGES_PER_RUN` (`6`), `OLLAMA_CAPABILITY_OVERRIDES` (empty; format
+  `family:caps;[...]` e.g. `gemma4:text,vison` — escape hatch for exotic models).
+
+### 4.5 Ollama AI package (`backend/app/ai/`)
+- Lives as a sub-package; module-level `ollama_client = OllamaClient()` singleton in
+  `main.py`. Design source of truth: `plans/ollama-ai-skills.md` (gated phases 0–7).
+- `ollama.py` is the **generic transport**: `OllamaRequest`/`OllamaResponse`,
+  `detect_capabilities` (families + name heuristics → text/vision/ocr/code),
+  `complete()` (OAI-style messages incl. base64 `images`), `resolve_model` (by
+  needs/family/preferred), `cached_models` (30s TTL).
+- `io.py`: `prepare_images(fm, story_id, refs)` → base64 list; raises 400 with
+  `{bad_images, reason}`. Rejects non-image extensions, >8MB files, `..`
+  traversal, other-story refs, and >`OLLAMA_MAX_IMAGES_PER_RUN` count.
+- `qwen3.5:9b` is a **reasoning model**: `content` is empty while thinking is in
+  progress, and `message.thinking` holds the chain. Keep `num_predict` generous (or
+  unset) and rely on `options.think=false` only when you want reasoning off.
 
 ---
 
@@ -373,60 +421,7 @@ Follow these to keep code consistent and safe.
 
 ---
 
-## CHANGELOG — codebase knowledge updates
-Every time you change functionality, add a dated entry here summarizing what changed and
-update the relevant section(s) above.
+---
 
-- **2026-08-29 — Character detail sub-sections are now column-wise icon tabs.**
-  - `CharacterRosterView` detail panel: the hero portrait/name/role header stays on top,
-    then the sections below it (Notes, Timeline, Gallery, Artifacts, Appearances) are
-    presented as a **vertical icon tab bar** (col-wise; collapses to a horizontal
-    scrollable row on small screens). Selecting an icon swaps only that tab's content into
-    the adjacent content column (`activeDetailTab` state in the component). **Notes is the
-    default tab** and the tab resets to Notes whenever the selected character changes.
-  - The Notes composer/notes list were moved out of the profile-header card into the
-    Notes tab; the header card is now just hero portrait + name/role bar.
-
-- **2026-08-29 — Character Roster expanded-detail redesign.**
-  - `CharacterRosterView` no longer uses a 4/8 split with a tall card list next to the
-    profile. Once a character is selected (always auto-selected on fetch if cast exists),
-    the detail panel takes full width and the rest of the cast appears as a horizontal,
-    scrollable strip of **circular thumbnails** (accent ring on the active one, name label
-    underneath, dashed "+" avatar for creating a new character).
-  - The full-size roster card grid only renders while no character is selected (or when
-    the cast is empty, which shows the empty-state prompt); both states render full width.
-
-- **2026-08-29 — Auto-synced character & concept-art backgrounds + tagged, searchable gallery.**
-  - Backend: `FileManager.sync_story_backgrounds(slug)` rebuilds the story's
-    `background_images` from concept art (gallery.json) + each character's `gallery[]`
-    (deduped, keeps existing, excludes/removes character portraits). Auto-invoked after
-    character POST/PUT/DELETE, after world PUT when `section == "gallery"`, and inside
-    `list_stories` so existing stories are backfilled immediately.
-  - `GalleryItem` gained `tags: List[str]`; new `StoryImageItem` schema + route
-    `GET /api/stories/{id}/images/library` returns a unified tagged image library
-    (gallery items + character portraits/gallery), used by the searchable gallery tab.
-  - Frontend: Gallery & Concept Art tab now shows the unified library with a search box
-    (matches title/context/category/tags/character), clickable tag chips, and a
-    comma-separated Tags field in the artwork form. Character-sourced images are read-only
-    and labelled "Character"; gallery items stay deletable.
-
-- **2026-08-29 — AmbientBackground auto-cycles story backgrounds.**
-  - `AmbientBackground.jsx` no longer shows only the fixed `background_url`. It now reads
-    all of the active story's `background_images` (falling back to `background_url`, then
-    `background_path`) and cross-fades through them on a 20s timer. If only one image (or
-    none) exists, it behaves as before. Index resets/keeps current image when the active
-    story or its image collection changes.
-
-- **2026-08-29 — Dashboard background image collections.**
-  - Backend: added `Story.background_images: List[str]` (schema); Dashboard stores multiple
-    background images per story (uploaded asset URLs or external URLs). `background_url`
-    mirrors the first image for backward compat (AmbientBackground).
-  - Added `DELETE /api/stories/{id}/assets/{filename}` (FileManager.delete_asset).
-  - Frontend: `StoryContext.updateStory(storyId, patch)` (PUT + refresh for any story);
-    `updateActiveStory` now delegates to it. `DashboardView` shows a background manager panel
-    (upload via existing assets/upload, paste URL, thumbnail grid with remove). Each story
-    card header shows a random image from the collection, re-rolled on refresh and via the
-    shuffle button.
-  - Bugfix: `CharacterRosterView` crashed with `Cannot read properties of null (reading
-    'notes')` when the active story had no characters (null `selectedChar`); the legacy
-    `characterNotes` fallback now uses optional chaining.
+> **CHANGELOG** has moved to [CHANGELOG.md](CHANGELOG.md). Update that file (not this one)
+> when you add codebase knowledge entries.

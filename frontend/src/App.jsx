@@ -8,11 +8,13 @@ import { QuickSearchModal } from './components/QuickSearchModal';
 import { Minimize2, Feather } from 'lucide-react';
 
 // Main Application Content Switcher placeholder modules
+import { HomeView } from './components/modules/HomeView';
 import { DashboardView } from './components/modules/DashboardView';
 import { WorldbuildingView } from './components/modules/WorldbuildingView';
 import { CharacterRosterView } from './components/modules/CharacterRosterView';
 import { BookOutlinerView } from './components/modules/BookOutlinerView';
 import { DraftEditorView } from './components/modules/DraftEditorView';
+import { QuotesView } from './components/modules/QuotesView';
 import { GoogleDriveModal } from './components/GoogleDriveModal';
 
 const MainLayout = () => {
@@ -21,6 +23,8 @@ const MainLayout = () => {
 
   const renderActiveModule = () => {
     switch (activeTab) {
+      case 'home':
+        return <HomeView />;
       case 'dashboard':
         return <DashboardView />;
       case 'world':
@@ -31,8 +35,10 @@ const MainLayout = () => {
         return <BookOutlinerView />;
       case 'editor':
         return <DraftEditorView />;
+      case 'quotes':
+        return <QuotesView />;
       default:
-        return <DashboardView />;
+        return <HomeView />;
     }
   };
 

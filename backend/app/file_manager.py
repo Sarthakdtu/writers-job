@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 from app.schemas import (
-    Story, Character, WorldMechanics, City, Faction, Artifact, GlossaryTerm,
+    Story, Character, WorldMechanics, City, Faction, Artifact, GlossaryTerm, Quote,
     Book, Chapter, Plot, CharacterArc
 )
 from app.file_utils import (
@@ -63,7 +63,8 @@ class FileManager:
             "factions.json": [],
             "artifacts.json": [],
             "glossary.json": [],
-            "gallery.json": []
+            "gallery.json": [],
+            "quotes.json": []
         }
 
         for filename, default_val in world_files_defaults.items():
@@ -111,6 +112,73 @@ class FileManager:
                 print(f"[FileManager Error] Failed to delete story dir {story_dir}: {e}")
                 return False
         return False
+
+    def get_story_fun_facts(self, story_slug: str) -> List[str]:
+        """
+        Collects a set of 'fun fact' strings drawn from the story's live data:
+        counts and spotlight entries for characters, artifacts (tools), cities,
+        factions, glossary terms, books/chapters, word count and world mechanics.
+        The frontend shuffles/selects from these to show a little random summary.
+        """
+        facts: List[str] = []
+        story = self.get_story(story_slug)
+        if not story:
+            return facts
+
+        characters = self.list_characters(story_slug)
+        cities = self.get_cities(story_slug)
+        factions = self.get_factions(story_slug)
+        artifacts = self.get_artifacts(story_slug)
+        glossary = self.get_glossary(story_slug)
+        books = self.list_books(story_slug)
+
+        chapter_total = 0
+        word_total = 0
+        for book in books:
+            chapters = self.list_chapters(story_slug, book.id)
+            chapter_total += len(chapters)
+            for ch in chapters:
+                word_total += ch.word_count or 0
+
+        facts.append(f"{story.title} features {len(characters)} character{'s' if len(characters) != 1 else ''}.")
+        facts.append(f"{len(factions)} active faction{'s' if len(factions) != 1 else ''} shape the world's politics.")
+        facts.append(f"There {'is' if len(cities) == 1 else 'are'} {len(cities)} cit{'y' if len(cities) == 1 else 'ies'} to explore.")
+        facts.append(f"{len(artifacts)} artifact{'s' if len(artifacts) != 1 else ''} hold special power or meaning.")
+        facts.append(f"The world keeps a glossary of {len(glossary)} terms.")
+        facts.append(f"You've outlined {len(books)} book{'s' if len(books) != 1 else ''}.")
+        facts.append(f"{chapter_total} chapter{'s' if chapter_total != 1 else ''} have been drafted so far.")
+        facts.append(f"Roughly {word_total:,} words of prose have been written.")
+
+        mech = self.get_world_mechanics(story_slug)
+        if mech.magic_system and mech.magic_system.strip():
+            facts.append(f"The magic system runs on '{mech.magic_system.strip()}'.")
+        if mech.technology_level and mech.technology_level.strip():
+            facts.append(f"Technology level: '{mech.technology_level.strip()}'.")
+        if mech.global_rules:
+            facts.append(f"A key world rule: '{mech.global_rules[0]}'.")
+
+        if characters:
+            pick = characters[0]
+            if pick.role:
+                facts.append(f"{pick.name} takes on the role of {pick.role}.")
+            if len(characters) > 1:
+                facts.append(f"{len(characters) - 1} other character{'s' if len(characters) - 1 != 1 else ''} orbit the spotlight.")
+        if artifacts:
+            a = artifacts[0]
+            facts.append(f"One notable artifact is '{a.name}'.")
+        if cities:
+            c = cities[0]
+            if c.atmosphere:
+                facts.append(f"The city of {c.name} has a '{c.atmosphere}' atmosphere.")
+        if factions:
+            f = factions[0]
+            if f.leader:
+                facts.append(f"{f.name} is led by {f.leader}.")
+        if glossary:
+            g = glossary[0]
+            facts.append(f"Did you know: '{g.term}' means {g.definition}.")
+
+        return facts
 
     # --- Asset Operations ---
 
@@ -297,6 +365,19 @@ class FileManager:
                     tags=tags,
                 ))
 
+        for city in self.get_cities(story_slug):
+            if not city.image_url:
+                continue
+            library.append(StoryImageItem(
+                source="city",
+                id=f"{city.id}-image",
+                title=f"{city.name} — Location",
+                image_url=city.image_url,
+                context=city.atmosphere or city.region or "",
+                category="Cities & Locations",
+                tags=[t for t in [city.name, city.region, "Cities & Locations", "Location"] if t],
+            ))
+
         for char in self.list_characters(story_slug):
             if char.image_url:
                 library.append(StoryImageItem(
@@ -399,6 +480,17 @@ class FileManager:
         path = self.get_world_file_path(story_slug, "glossary")
         write_json_safe(path, [t.model_dump() for t in terms])
         return terms
+
+    def get_quotes(self, story_slug: str) -> List[Quote]:
+        path = self.get_world_file_path(story_slug, "quotes")
+        data = read_json_safe(path, default=[])
+        return [Quote(**item) for item in data] if isinstance(data, list) else []
+
+    def save_quotes(self, story_slug: str, quotes: List[Quote]) -> List[Quote]:
+        self.ensure_story_structure(story_slug)
+        path = self.get_world_file_path(story_slug, "quotes")
+        write_json_safe(path, [q.model_dump() for q in quotes])
+        return quotes
 
     # --- Book & Plot Operations ---
 

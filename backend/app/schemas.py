@@ -14,8 +14,10 @@ class Character(BaseModel):
     name: str
     image_url: Optional[str] = ""
     role: Optional[str] = "Main Character"
+    location: Optional[str] = ""
     bio: Optional[str] = ""
     notes: List[str] = Field(default_factory=list)
+    quotes: List[str] = Field(default_factory=list)
     gallery: List[str] = Field(default_factory=list)
     artifact_ids: List[str] = Field(default_factory=list)
     timeline_events: List[TimelineEvent] = Field(default_factory=list)
@@ -33,6 +35,7 @@ class City(BaseModel):
     name: str
     region: str
     atmosphere: str
+    image_url: Optional[str] = ""
     key_locations: List[str] = Field(default_factory=list)
 
 
@@ -68,6 +71,13 @@ class GalleryItem(BaseModel):
     image_url: str
     context: str
     category: Optional[str] = "Concept Art"
+    tags: List[str] = Field(default_factory=list)
+
+
+class Quote(BaseModel):
+    id: str
+    text: str
+    note: Optional[str] = ""
     tags: List[str] = Field(default_factory=list)
 
 
@@ -164,3 +174,4 @@ class Story(BaseModel):
     aesthetic_theme: Optional[str] = "sepia"
     background_path: Optional[str] = ""
     google_doc_ids: Dict[str, str] = Field(default_factory=dict)
+    overview: List[str] = Field(default_factory=list)

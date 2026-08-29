@@ -60,7 +60,8 @@ flowchart TD
 - **Ambient Layer**: Smooth cross-fade transition overlay when `story.background_url` updates.
 
 ### 4. Interactive Modules
-- **Story Dashboard** ([`DashboardView.jsx`](file:///Users/sarthaksri/Desktop/writer_job/frontend/src/components/modules/DashboardView.jsx)): Story cards grid with dynamic background image URL picker and quick-add tags.
+- **Home** ([`HomeView.jsx`](file:///Users/sarthaksri/Desktop/writer_job/frontend/src/components/modules/HomeView.jsx)): All-stories gallery with dynamic background image picker, quick-add tags, and New Story creation.
+- **Story Dashboard** ([`DashboardView.jsx`](file:///Users/sarthaksri/Desktop/writer_job/frontend/src/components/modules/DashboardView.jsx)): Dedicated per-story view with a Story Overview (add/remove paragraphs), a random Summary · Fun Fact card, and the aesthetic theme picker.
 - **Character Roster & Appearances Matrix** ([`CharacterRosterView.jsx`](file:///Users/sarthaksri/Desktop/writer_job/frontend/src/components/modules/CharacterRosterView.jsx)): Avatar cards, local image upload or URL link, interactive vertical timeline component, and auto-scanned appearances matrix badges.
 - **Worldbuilding Hub & Concept Art Gallery** ([`WorldbuildingView.jsx`](file:///Users/sarthaksri/Desktop/writer_job/frontend/src/components/modules/WorldbuildingView.jsx)): Tabbed interface for Cities, Magic & Mechanics, Factions, Lexicon, and **Gallery & Concept Art** with lore context and local asset uploads.
 - **Book Outliner** ([`BookOutlinerView.jsx`](file:///Users/sarthaksri/Desktop/writer_job/frontend/src/components/modules/BookOutlinerView.jsx)): Tree view of Books → Chapters → Scenes, Plot Beats sheet, Character Arcs per book, and POV Tracker.

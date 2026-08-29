@@ -1,0 +1,1 @@
+"""AI module: local Ollama integration for analyses, imports and the Skill Studio."""

@@ -15,6 +15,19 @@ import {
   Check
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
+import ReactMarkdown from 'react-markdown';
+
+const markdownComponents = {
+  p: ({ children }) => <p className="my-1">{children}</p>,
+  ul: ({ children }) => <ul className="list-disc pl-4 my-1">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal pl-4 my-1">{children}</ol>,
+  li: ({ children }) => <li className="my-0.5">{children}</li>,
+  h1: ({ children }) => <h1 className="font-bold text-base my-1">{children}</h1>,
+  h2: ({ children }) => <h2 className="font-bold text-sm my-1">{children}</h2>,
+  h3: ({ children }) => <h3 className="font-semibold text-xs my-1">{children}</h3>,
+  strong: ({ children }) => <strong className="font-bold text-[var(--text-main)]">{children}</strong>,
+  em: ({ children }) => <em className="italic">{children}</em>,
+};
 
 export const BookOutlinerView = () => {
   const { activeStory } = useStory();
@@ -35,9 +48,13 @@ export const BookOutlinerView = () => {
   const [showArcModal, setShowArcModal] = useState(false);
 
   const [bookForm, setBookForm] = useState({ id: '', title: '', order: 1, target_word_count: 50000 });
-  const [chapterForm, setChapterForm] = useState({ id: '', title: '', pov_character_id: '', scene_breakdown: '' });
+  const [chapterForm, setChapterForm] = useState({ id: '', title: '', pov_character_id: '' });
   const [beatForm, setBeatForm] = useState({ id: '', title: '', description: '', chapter_id: '', character_ids: '' });
   const [arcForm, setArcForm] = useState({ character_id: '', arc_summary: '', starting_state: '', ending_state: '', key_milestones: '' });
+
+  const [editingSceneId, setEditingSceneId] = useState(null);
+  const [editingSceneText, setEditingSceneText] = useState('');
+  const [savingSceneId, setSavingSceneId] = useState(null);
 
   const fetchBooks = async () => {
     if (!activeStory) return;
@@ -129,11 +146,12 @@ export const BookOutlinerView = () => {
     e.preventDefault();
     if (!activeStory || !selectedBook || !chapterForm.title.trim()) return;
     const chId = chapterForm.id || `${chapters.length + 1}`;
+    const existing = chapters.find((c) => c.id === chId);
     const payload = {
       id: chId,
       title: chapterForm.title,
       pov_character_id: chapterForm.pov_character_id || null,
-      scene_breakdown: chapterForm.scene_breakdown || '',
+      scene_breakdown: existing?.scene_breakdown || '',
     };
     try {
       const res = await fetch(`/api/stories/${activeStory.id}/books/${selectedBook.id}/chapters`, {
@@ -148,6 +166,34 @@ export const BookOutlinerView = () => {
       }
     } catch (err) {
       console.error('Failed to save chapter:', err);
+    }
+  };
+
+  // Save Scene Breakdown (inline)
+  const handleSaveSceneBreakdown = async (ch) => {
+    if (!activeStory || !selectedBook) return;
+    setSavingSceneId(ch.id);
+    try {
+      const res = await fetch(`/api/stories/${activeStory.id}/books/${selectedBook.id}/chapters`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: ch.id,
+          title: ch.title,
+          pov_character_id: ch.pov_character_id || null,
+          scene_breakdown: editingSceneText,
+        }),
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setChapters((prev) => [...prev.filter((c) => c.id !== saved.id), saved]);
+        setEditingSceneId(null);
+        setEditingSceneText('');
+      }
+    } catch (err) {
+      console.error('Failed to save scene breakdown:', err);
+    } finally {
+      setSavingSceneId(null);
     }
   };
 
@@ -360,7 +406,7 @@ export const BookOutlinerView = () => {
                 </h3>
                 <button
                   onClick={() => {
-                    setChapterForm({ id: '', title: '', pov_character_id: '', scene_breakdown: '' });
+                    setChapterForm({ id: '', title: '', pov_character_id: '' });
                     setShowChapterModal(true);
                   }}
                   className="flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-3.5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-[var(--accent-hover)] transition-all cursor-pointer"
@@ -407,7 +453,6 @@ export const BookOutlinerView = () => {
                               id: ch.id,
                               title: ch.title,
                               pov_character_id: ch.pov_character_id || '',
-                              scene_breakdown: ch.scene_breakdown || '',
                             });
                             setShowChapterModal(true);
                           }}
@@ -417,15 +462,72 @@ export const BookOutlinerView = () => {
                         </button>
                       </div>
 
-                      {/* Scene Breakdown */}
-                      {ch.scene_breakdown && (
-                        <div className="border-t border-[var(--border-subtle)] pt-3 text-xs text-[var(--text-muted)] font-prose leading-relaxed">
-                          <div className="text-[10px] font-bold uppercase text-[var(--text-dim)] mb-1">
+                      {/* Scene Breakdown (inline editable) */}
+                      <div className="border-t border-[var(--border-subtle)] pt-3 text-xs text-[var(--text-muted)] font-prose leading-relaxed">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="text-[10px] font-bold uppercase text-[var(--text-dim)]">
                             Scene Breakdown
                           </div>
-                          <p>{ch.scene_breakdown}</p>
+                          {editingSceneId === ch.id ? (
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => handleSaveSceneBreakdown(ch)}
+                                disabled={savingSceneId === ch.id}
+                                className="flex items-center gap-1 rounded-lg bg-[var(--accent)] px-2.5 py-1 text-[10px] font-bold text-white shadow-xs hover:bg-[var(--accent-hover)] disabled:opacity-50"
+                              >
+                                <Check className="h-3 w-3" />
+                                {savingSceneId === ch.id ? 'Saving...' : 'Save'}
+                              </button>
+                              <button
+                                onClick={() => { setEditingSceneId(null); setEditingSceneText(''); }}
+                                className="rounded-lg px-2 py-1 text-[10px] font-bold text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => { setEditingSceneId(ch.id); setEditingSceneText(ch.scene_breakdown || ''); }}
+                              className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"
+                            >
+                              <Edit3 className="h-3 w-3" />
+                              Edit
+                            </button>
+                          )}
                         </div>
-                      )}
+                        {editingSceneId === ch.id ? (
+                          <div className="space-y-2">
+                            <textarea
+                              rows={4}
+                              autoFocus
+                              value={editingSceneText}
+                              onChange={(e) => setEditingSceneText(e.target.value)}
+                              placeholder="Scene 1: Aria arrives at the citadel...&#10;Scene 2: Confrontation with the archmage..."
+                              className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:outline-hidden font-mono"
+                            />
+                            {editingSceneText.trim() && (
+                              <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-card)] px-3 py-2 text-xs text-[var(--text-main)]">
+                                <div className="text-[10px] font-bold uppercase text-[var(--text-dim)] mb-1">
+                                  Preview
+                                </div>
+                                <ReactMarkdown components={markdownComponents}>
+                                  {editingSceneText}
+                                </ReactMarkdown>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-xs text-[var(--text-muted)] font-prose leading-relaxed">
+                            {ch.scene_breakdown ? (
+                              <ReactMarkdown components={markdownComponents}>
+                                {ch.scene_breakdown}
+                              </ReactMarkdown>
+                            ) : (
+                              <p className="text-[var(--text-dim)] italic">No scene breakdown yet — click Edit to plot the scenes.</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -702,19 +804,6 @@ export const BookOutlinerView = () => {
                     </option>
                   ))}
                 </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
-                  Scene Breakdown & Key Beats
-                </label>
-                <textarea
-                  rows={4}
-                  value={chapterForm.scene_breakdown}
-                  onChange={(e) => setChapterForm({ ...chapterForm, scene_breakdown: e.target.value })}
-                  placeholder="Scene 1: Aria arrives at the citadel...&#10;Scene 2: Confrontation with the archmage..."
-                  className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:outline-hidden"
-                />
               </div>
 
               <div className="flex justify-end gap-2 pt-2">

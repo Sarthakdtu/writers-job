@@ -47,7 +47,7 @@ export const WorldbuildingView = () => {
   const [library, setLibrary] = useState([]);
 
   // Form states for items
-  const [cityForm, setCityForm] = useState({ id: '', name: '', region: '', atmosphere: '', key_locations: '' });
+  const [cityForm, setCityForm] = useState({ id: '', name: '', region: '', atmosphere: '', image_url: '', key_locations: '' });
   const [mechanicsForm, setMechanicsForm] = useState({ magic_system: '', technology_level: '', global_rules: '' });
   const [factionForm, setFactionForm] = useState({ id: '', name: '', description: '', leader: '', alignment: '' });
   const [glossaryForm, setGlossaryForm] = useState({ id: '', term: '', definition: '', category: '' });
@@ -233,7 +233,11 @@ export const WorldbuildingView = () => {
 
       if (res.ok) {
         const data = await res.json();
-        setGalleryForm((prev) => ({ ...prev, image_url: data.url }));
+        if (activeSection === 'cities') {
+          setCityForm((prev) => ({ ...prev, image_url: data.url }));
+        } else {
+          setGalleryForm((prev) => ({ ...prev, image_url: data.url }));
+        }
       }
     } catch (err) {
       console.error('Failed to upload image:', err);
@@ -251,11 +255,26 @@ export const WorldbuildingView = () => {
       name: cityForm.name,
       region: cityForm.region,
       atmosphere: cityForm.atmosphere,
+      image_url: cityForm.image_url || '',
       key_locations: locations,
     };
     const current = Array.isArray(data) ? data : [];
     const updated = [...current.filter((item) => item.id !== newItem.id), newItem];
     saveSectionData(updated);
+  };
+
+  // Open the city form pre-filled for editing
+  const handleEditCity = (city) => {
+    setCityForm({
+      id: city.id,
+      name: city.name,
+      region: city.region,
+      atmosphere: city.atmosphere,
+      image_url: city.image_url || '',
+      key_locations: (city.key_locations || []).join('\n'),
+    });
+    setImageSourceMode(city.image_url?.startsWith('/api/stories/') ? 'upload' : 'url');
+    setShowItemModal(true);
   };
 
   // Submit Faction
@@ -358,7 +377,7 @@ export const WorldbuildingView = () => {
                 setShowArtifactModal(true);
                 return;
               }
-              setCityForm({ id: '', name: '', region: '', atmosphere: '', key_locations: '' });
+              setCityForm({ id: '', name: '', region: '', atmosphere: '', image_url: '', key_locations: '' });
               setFactionForm({ id: '', name: '', description: '', leader: '', alignment: '' });
               setGlossaryForm({ id: '', term: '', definition: '', category: 'General' });
               setGalleryForm({ id: '', title: '', image_url: '', context: '', category: 'Concept Art', tags: '' });
@@ -402,8 +421,40 @@ export const WorldbuildingView = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {Array.isArray(data) && data.length > 0 ? (
               data.map((city) => (
-                <div key={city.id} className="literary-card rounded-2xl p-5 space-y-3 relative group">
-                  <div className="flex items-start justify-between">
+                <div key={city.id} className="literary-card rounded-2xl overflow-hidden flex flex-col group">
+                  {/* Location Image */}
+                  <div className="h-40 w-full relative overflow-hidden bg-[var(--bg-base)] border-b border-[var(--border-subtle)]">
+                    {city.image_url ? (
+                      <img
+                        src={city.image_url}
+                        alt={city.name}
+                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      />
+                    ) : (
+                      <div className="h-full w-full flex items-center justify-center font-prose font-bold text-5xl text-[var(--accent)]/25 bg-gradient-to-br from-[var(--accent-light)] to-[var(--bg-base)]">
+                        {(city.name || 'C').charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
+                    <div className="absolute top-3 right-3 flex items-center gap-1.5">
+                      <button
+                        onClick={() => handleEditCity(city)}
+                        className="p-1.5 rounded-lg bg-black/60 text-white hover:bg-[var(--accent)] transition-colors"
+                        title="Edit City"
+                      >
+                        <Edit3 className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteItem(city.id)}
+                        className="p-1.5 rounded-lg bg-black/60 text-white hover:bg-red-600 transition-colors"
+                        title="Delete City"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-5 space-y-3 flex-1">
                     <div>
                       <h3 className="font-prose text-lg font-bold text-[var(--text-main)]">
                         {city.name}
@@ -412,38 +463,31 @@ export const WorldbuildingView = () => {
                         Region: {city.region}
                       </span>
                     </div>
-                    <button
-                      onClick={() => handleDeleteItem(city.id)}
-                      className="p-1.5 rounded-lg text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500 transition-colors"
-                      title="Delete City"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+
+                    {city.atmosphere && (
+                      <p className="text-xs text-[var(--text-muted)] italic">
+                        "{city.atmosphere}"
+                      </p>
+                    )}
+
+                    {city.key_locations && city.key_locations.length > 0 && (
+                      <div className="border-t border-[var(--border-subtle)] pt-2 space-y-1">
+                        <div className="text-[10px] font-bold uppercase text-[var(--text-dim)]">
+                          Key Landmarks
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {city.key_locations.map((loc, i) => (
+                            <span
+                              key={i}
+                              className="rounded-md bg-[var(--bg-base)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)] border border-[var(--border-subtle)]"
+                            >
+                              {loc}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-
-                  {city.atmosphere && (
-                    <p className="text-xs text-[var(--text-muted)] italic">
-                      "{city.atmosphere}"
-                    </p>
-                  )}
-
-                  {city.key_locations && city.key_locations.length > 0 && (
-                    <div className="border-t border-[var(--border-subtle)] pt-2 space-y-1">
-                      <div className="text-[10px] font-bold uppercase text-[var(--text-dim)]">
-                        Key Landmarks
-                      </div>
-                      <div className="flex flex-wrap gap-1">
-                        {city.key_locations.map((loc, i) => (
-                          <span
-                            key={i}
-                            className="rounded-md bg-[var(--bg-base)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)] border border-[var(--border-subtle)]"
-                          >
-                            {loc}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
               ))
             ) : (
@@ -855,7 +899,11 @@ export const WorldbuildingView = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
           <div className="w-full max-w-lg rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] p-6 shadow-2xl space-y-4">
             <h3 className="font-prose text-xl font-bold text-[var(--text-main)]">
-              Add {activeSection === 'gallery' ? 'Gallery Artwork' : activeSection.substring(0, 1).toUpperCase() + activeSection.substring(1)} Entry
+              {activeSection === 'cities'
+                ? cityForm.id ? 'Edit City/Location' : 'Add City/Location'
+                : activeSection === 'gallery'
+                ? 'Add Gallery Artwork'
+                : 'Add ' + activeSection.substring(0, 1).toUpperCase() + activeSection.substring(1) + ' Entry'}
             </h3>
 
             {/* City Form */}
@@ -910,6 +958,87 @@ export const WorldbuildingView = () => {
                     placeholder="Grand Library&#10;Clockwork Tower"
                     className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
                   />
+                </div>
+
+                {/* City Image */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-semibold text-[var(--text-muted)]">
+                      Location Image
+                    </label>
+                    <div className="flex items-center gap-1 bg-[var(--bg-base)] p-0.5 rounded-lg border border-[var(--border-subtle)]">
+                      <button
+                        type="button"
+                        onClick={() => setImageSourceMode('upload')}
+                        className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold transition-all cursor-pointer ${
+                          imageSourceMode === 'upload'
+                            ? 'bg-[var(--accent)] text-white'
+                            : 'text-[var(--text-muted)]'
+                        }`}
+                      >
+                        <Upload className="h-3 w-3" />
+                        <span>Upload File</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setImageSourceMode('url')}
+                        className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold transition-all cursor-pointer ${
+                          imageSourceMode === 'url'
+                            ? 'bg-[var(--accent)] text-white'
+                            : 'text-[var(--text-muted)]'
+                        }`}
+                      >
+                        <LinkIcon className="h-3 w-3" />
+                        <span>URL Link</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {imageSourceMode === 'upload' ? (
+                    <div className="border-2 border-dashed border-[var(--border-color)] rounded-xl p-3 bg-[var(--bg-base)] text-center space-y-2">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                        id="city-image-file-input"
+                      />
+                      <label
+                        htmlFor="city-image-file-input"
+                        className="cursor-pointer inline-flex items-center gap-2 rounded-lg bg-[var(--accent-light)] px-3 py-1.5 text-xs font-semibold text-[var(--accent)] border border-[var(--border-subtle)] hover:bg-[var(--accent)] hover:text-white transition-all"
+                      >
+                        <Upload className="h-3.5 w-3.5" />
+                        <span>{uploading ? 'Uploading...' : 'Choose Image File from Computer'}</span>
+                      </label>
+                      <p className="text-[10px] text-[var(--text-dim)]">
+                        Saves asset locally inside `/data/stories/${activeStory.id}/assets/`
+                      </p>
+                    </div>
+                  ) : (
+                    <input
+                      type="url"
+                      value={cityForm.image_url}
+                      onChange={(e) => setCityForm({ ...cityForm, image_url: e.target.value })}
+                      placeholder="https://images.unsplash.com/photo-..."
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                    />
+                  )}
+
+                  {cityForm.image_url && (
+                    <div className="flex items-center gap-3 p-2 rounded-lg bg-[var(--bg-base)] border border-[var(--border-subtle)]">
+                      <img src={cityForm.image_url} alt="Preview" className="h-10 w-10 rounded-lg object-cover border border-[var(--accent)]" />
+                      <div className="flex-1 truncate text-[11px] font-mono text-[var(--text-muted)]">
+                        {cityForm.image_url}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCityForm({ ...cityForm, image_url: '' })}
+                        className="text-red-500 p-1 hover:bg-red-500/10 rounded-md"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
                   <button

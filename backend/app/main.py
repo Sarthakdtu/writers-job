@@ -1,18 +1,43 @@
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, HTTPException, Body
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, Body, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.schemas import (
     Story, Character, CharacterAppearances, WorldMechanics, City, Faction, Artifact, GlossaryTerm,
-    Book, Chapter, Plot, CharacterArc, StoryImageItem
+    Quote, Book, Chapter, Plot, CharacterArc, StoryImageItem
 )
 from app.file_manager import FileManager
+from app.ai.ollama import OllamaClient, cached_models
+from app.ai.schemas import (
+    AIStatus, AIConfig, RunRequest, RunInput, AIJob, AIResult, PipelineSummary,
+    CustomSkill, CustomSkillPayload, RouterRequest, RouterDecision,
+)
+from app.ai import config as ai_config
+from app.ai import custom as custom_mod
+from app.ai import pipelines as pipelines_mod
+from app.ai import router as router_mod
+from app.ai.store import AiStore
+from app.ai.jobs import JobManager
+
+file_manager = FileManager()
+ollama_client = OllamaClient()
+ai_store = AiStore(file_manager.base_data_dir)
+job_manager = JobManager(file_manager, ai_store, file_manager.base_data_dir)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    await job_manager.recover_interrupted()
+    yield
+
 
 app = FastAPI(
     title="Fiction Writer Suite API",
     description="Local-first file-system backed API for fiction writers",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Enable CORS for React frontend
@@ -23,8 +48,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-file_manager = FileManager()
 
 
 # --- Health Check ---
@@ -161,9 +184,24 @@ def update_world_section(story_id: str, section: str, data: Any = Body(...)):
     return saved
 
 
+@app.get("/api/stories/{story_id}/quotes", response_model=List[Quote])
+def list_quotes(story_id: str):
+    return file_manager.get_quotes(story_id)
+
+
+@app.post("/api/stories/{story_id}/quotes", response_model=List[Quote])
+def save_quotes(story_id: str, quotes: List[Quote]):
+    return file_manager.save_quotes(story_id, quotes)
+
+
 @app.get("/api/stories/{story_id}/images/library", response_model=List[StoryImageItem])
 def get_story_image_library(story_id: str):
     return file_manager.get_image_library(story_id)
+
+
+@app.get("/api/stories/{story_id}/fun-facts", response_model=List[str])
+def get_story_fun_facts(story_id: str):
+    return file_manager.get_story_fun_facts(story_id)
 
 
 # --- 4. Book & Chapter Endpoints ---
@@ -367,4 +405,149 @@ async def trigger_google_drive_backup(story_id: Optional[str] = None):
         _backup_status["status"] = "error"
         _backup_status["error_message"] = str(e)
         raise HTTPException(status_code=500, detail=f"Google Drive sync failed: {str(e)}")
+
+
+# --- 7. Local AI (Ollama) Endpoints ---
+
+@app.get("/api/ai/status", response_model=AIStatus)
+async def ai_status():
+    models = await cached_models(ollama_client)
+    if models is None:
+        return AIStatus(
+            available=False,
+            ollama_base_url=ollama_client.base_url,
+            models=[],
+            default_model=ai_config.get_default_model(),
+            ocr_model=ai_config.get_ocr_model(),
+            vision_model=ai_config.get_vision_model(),
+            router_model=ai_config.get_router_model(),
+            error_hint="Ollama is offline. Start it with: ollama serve",
+            running_jobs=job_manager.running_count(),
+            queued_jobs=job_manager.queued_count(),
+        )
+    return AIStatus(
+        available=True,
+        ollama_base_url=ollama_client.base_url,
+        models=models,
+        default_model=ai_config.get_default_model(),
+        ocr_model=ai_config.get_ocr_model(),
+        vision_model=ai_config.get_vision_model(),
+        router_model=ai_config.get_router_model(),
+        running_jobs=job_manager.running_count(),
+        queued_jobs=job_manager.queued_count(),
+    )
+
+
+@app.get("/api/ai/pipelines", response_model=List[PipelineSummary])
+async def list_ai_pipelines(story_id: str, tab: Optional[str] = Query(None)):
+    enabled_map = ai_store.skill_enabled_map(story_id, pipelines_mod.all_pipeline_ids())
+    builtins = pipelines_mod.filter_for_tab(tab)
+    summaries = [pipelines_mod.to_summary(p, enabled_map.get(p.id, True)) for p in builtins]
+
+    customs = custom_mod.load_all(file_manager.base_data_dir)
+    for skill in customs:
+        if tab and skill.tabs and tab not in skill.tabs:
+            continue
+        p = job_manager._custom_pipeline(skill)
+        summaries.append(pipelines_mod.to_summary(p, enabled_map.get(p.id, True)))
+    return summaries
+
+
+@app.get("/api/ai/config/{story_id}", response_model=AIConfig)
+async def get_ai_config(story_id: str):
+    return ai_store.read_config(story_id)
+
+
+@app.put("/api/ai/config/{story_id}", response_model=AIConfig)
+async def put_ai_config(story_id: str, cfg: AIConfig):
+    return ai_store.write_config(story_id, cfg)
+
+
+@app.post("/api/ai/run", response_model=AIJob, status_code=202)
+async def run_ai_pipeline(req: RunRequest):
+    models = await cached_models(ollama_client)
+    if not models:
+        raise HTTPException(
+            status_code=503,
+            detail={"pipeline": req.skill, "hint": "Ollama is not running. Start it with: ollama serve"},
+        )
+    job = await job_manager.enqueue(req.story_id, req.skill, req.input or RunInput())
+    return job
+
+
+@app.get("/api/ai/jobs/{story_id}", response_model=List[AIJob])
+async def list_ai_jobs(story_id: str):
+    return ai_store.list_jobs(story_id)
+
+
+@app.get("/api/ai/jobs/{story_id}/{job_id}", response_model=AIJob)
+async def get_ai_job(story_id: str, job_id: str):
+    job = ai_store.read_job(story_id, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@app.post("/api/ai/jobs/{job_id}/cancel")
+async def cancel_ai_job(job_id: str, story_id: str = Query("")):
+    if not story_id:
+        for s in [d.name for d in file_manager.base_data_dir.iterdir() if d.is_dir()]:
+            if ai_store.read_job(s, job_id):
+                story_id = s
+                break
+    job = await job_manager.cancel(story_id, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"ok": True, "new_status": job.status, "partial_available": job.result_path is not None}
+
+
+@app.get("/api/ai/results/{story_id}/{pipeline}", response_model=AIResult)
+async def get_ai_result(story_id: str, pipeline: str):
+    result = ai_store.read_result(story_id, pipeline)
+    if not result:
+        raise HTTPException(status_code=404, detail="No result yet for this pipeline")
+    return result
+
+
+async def _route_custom(payload: dict) -> RouterDecision:
+    return await router_mod.route_skill(ollama_client, payload)
+
+
+@app.get("/api/ai/custom", response_model=List[CustomSkill])
+async def list_custom_skills():
+    return custom_mod.load_all(file_manager.base_data_dir)
+
+
+@app.post("/api/ai/custom", response_model=CustomSkill, status_code=201)
+async def create_custom_skill(payload: CustomSkillPayload):
+    return await custom_mod.create(file_manager.base_data_dir, payload, _route_custom)
+
+
+@app.put("/api/ai/custom/{skill_id}", response_model=CustomSkill)
+async def update_custom_skill(skill_id: str, payload: CustomSkillPayload):
+    skill = await custom_mod.update(file_manager.base_data_dir, skill_id, payload, _route_custom)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Custom skill not found")
+    return skill
+
+
+@app.delete("/api/ai/custom/{skill_id}")
+async def delete_custom_skill(skill_id: str):
+    purged = custom_mod.delete(file_manager.base_data_dir, skill_id, ai_store)
+    if purged < 0:
+        raise HTTPException(status_code=404, detail="Custom skill not found")
+    return {"deleted": True, "purged_from_stories": purged}
+
+
+@app.post("/api/ai/custom/{skill_id}/duplicate", response_model=CustomSkill)
+async def duplicate_custom_skill(skill_id: str):
+    skill = await custom_mod.duplicate(file_manager.base_data_dir, skill_id, _route_custom)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Custom skill not found")
+    return skill
+
+
+@app.post("/api/ai/custom/route", response_model=RouterDecision)
+async def preview_router(req: RouterRequest):
+    return await router_mod.route_skill(ollama_client, req.model_dump())
 

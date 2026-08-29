@@ -7,7 +7,7 @@ const ACTIVE_STORY_KEY = 'writer_job_active_story_id';
 export const StoryProvider = ({ children }) => {
   const [stories, setStories] = useState([]);
   const [activeStory, setActiveStory] = useState(null);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState('home');
   const [selectedTag, setSelectedTag] = useState('All');
   const [focusMode, setFocusMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);

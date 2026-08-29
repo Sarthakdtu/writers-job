@@ -1,10 +1,12 @@
 import React from 'react';
 import {
+  Home,
   LayoutDashboard,
   Globe,
   Users,
   GitFork,
   FileText,
+  Quote,
   ChevronLeft,
   ChevronRight,
   BookOpen
@@ -12,11 +14,13 @@ import {
 import { useStory } from '../context/StoryContext';
 
 export const NAV_ITEMS = [
-  { id: 'dashboard', label: 'Story Dashboard', icon: LayoutDashboard, desc: 'Overview & aesthetic settings' },
+  { id: 'home', label: 'Home', icon: Home, desc: 'All your stories & projects' },
+  { id: 'dashboard', label: 'Story Dashboard', icon: LayoutDashboard, desc: 'Overview, facts & aesthetics' },
   { id: 'world', label: 'Worldbuilding Hub', icon: Globe, desc: 'Cities, mechanics, factions' },
   { id: 'characters', label: 'Character Roster', icon: Users, desc: 'Profiles & appearances matrix' },
   { id: 'outliner', label: 'Book Outliner', icon: GitFork, desc: 'Beats, arcs, scene breakdowns' },
   { id: 'editor', label: 'Draft Editor', icon: FileText, desc: 'Dual-mode Markdown & Google Docs' },
+  { id: 'quotes', label: 'Quotes', icon: Quote, desc: 'Memorable lines, notes & tags' },
 ];
 
 export const Sidebar = () => {

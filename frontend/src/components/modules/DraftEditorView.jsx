@@ -19,6 +19,19 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
+import ReactMarkdown from 'react-markdown';
+
+const markdownComponents = {
+  p: ({ children }) => <p className="my-1">{children}</p>,
+  ul: ({ children }) => <ul className="list-disc pl-4 my-1">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal pl-4 my-1">{children}</ol>,
+  li: ({ children }) => <li className="my-0.5">{children}</li>,
+  h1: ({ children }) => <h1 className="font-bold text-base my-1">{children}</h1>,
+  h2: ({ children }) => <h2 className="font-bold text-sm my-1">{children}</h2>,
+  h3: ({ children }) => <h3 className="font-semibold text-xs my-1">{children}</h3>,
+  strong: ({ children }) => <strong className="font-bold text-[var(--text-main)]">{children}</strong>,
+  em: ({ children }) => <em className="italic">{children}</em>,
+};
 
 export const DraftEditorView = () => {
   const { activeStory, setFocusMode } = useStory();
@@ -39,6 +52,9 @@ export const DraftEditorView = () => {
   // Google Doc ID State
   const [googleDocId, setGoogleDocId] = useState('');
   const [editingDocId, setEditingDocId] = useState(false);
+
+  // Scene breakdown panel visibility
+  const [showBreakdown, setShowBreakdown] = useState(true);
 
   // Debounce save timer ref
   const saveTimeoutRef = useRef(null);
@@ -259,6 +275,31 @@ export const DraftEditorView = () => {
           </button>
         </div>
       </div>
+
+      {/* Scene Breakdown Reference Panel (for the selected chapter) */}
+      {currentChapter?.scene_breakdown && (
+        <div className="literary-card rounded-2xl p-4 space-y-2">
+          <button
+            onClick={() => setShowBreakdown((v) => !v)}
+            className="w-full flex items-center justify-between text-left"
+          >
+            <span className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-dim)]">
+              <FileText className="h-3.5 w-3.5 text-[var(--accent)]" />
+              Scene Breakdown & Key Beats — {currentChapter.title}
+            </span>
+            <ChevronDown
+              className={`h-4 w-4 text-[var(--text-dim)] transition-transform ${showBreakdown ? 'rotate-180' : ''}`}
+            />
+          </button>
+          {showBreakdown && (
+            <div className="border-t border-[var(--border-subtle)] pt-2 text-xs text-[var(--text-muted)] font-prose leading-relaxed max-h-48 overflow-y-auto">
+              <ReactMarkdown components={markdownComponents}>
+                {currentChapter.scene_breakdown}
+              </ReactMarkdown>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* MODE 1: LOCAL MARKDOWN EDITOR */}
       {editorMode === 'markdown' && (

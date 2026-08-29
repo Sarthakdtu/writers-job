@@ -20,7 +20,9 @@ import {
   Gem,
   ChevronLeft,
   ChevronRight,
-  StickyNote
+  StickyNote,
+  MapPin,
+  Quote
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
 import { ArtifactFormModal } from '../ArtifactFormModal';
@@ -47,9 +49,13 @@ export const CharacterRosterView = () => {
     id: '',
     name: '',
     role: 'Protagonist',
+    location: '',
     image_url: '',
     bio: '',
   });
+
+  // Story cities (for the "home location" suggestion datalist)
+  const [storyCities, setStoryCities] = useState([]);
 
   // Timeline Event Form
   const [eventForm, setEventForm] = useState({
@@ -70,12 +76,21 @@ export const CharacterRosterView = () => {
   // Character notes (inline, no modal)
   const [showNoteInput, setShowNoteInput] = useState(false);
   const [noteDraft, setNoteDraft] = useState('');
+  const [editingNoteIdx, setEditingNoteIdx] = useState(null);
+  const [editingNoteDraft, setEditingNoteDraft] = useState('');
+
+  // Character quotes (inline, no modal)
+  const [showQuoteInput, setShowQuoteInput] = useState(false);
+  const [quoteDraft, setQuoteDraft] = useState('');
+  const [editingQuoteIdx, setEditingQuoteIdx] = useState(null);
+  const [editingQuoteDraft, setEditingQuoteDraft] = useState('');
 
   // Active detail tab (Notes is the default view)
   const [activeDetailTab, setActiveDetailTab] = useState('notes');
 
   const detailTabs = [
     { id: 'notes', label: 'Notes', icon: StickyNote },
+    { id: 'quotes', label: 'Quotes', icon: Quote },
     { id: 'timeline', label: 'Timeline', icon: Clock },
     { id: 'gallery', label: 'Gallery', icon: ImageIcon },
     { id: 'artifacts', label: 'Artifacts', icon: Gem },
@@ -129,9 +144,23 @@ export const CharacterRosterView = () => {
     }
   };
 
+  const fetchStoryCities = async () => {
+    if (!activeStory) return;
+    try {
+      const res = await fetch(`/api/stories/${activeStory.id}/world/cities`);
+      if (res.ok) {
+        const json = await res.json();
+        if (Array.isArray(json)) setStoryCities(json);
+      }
+    } catch (err) {
+      console.error('Failed to fetch story cities:', err);
+    }
+  };
+
   useEffect(() => {
     fetchCharacters();
     fetchStoryArtifacts();
+    fetchStoryCities();
   }, [activeStory]);
 
   useEffect(() => {
@@ -336,15 +365,22 @@ export const CharacterRosterView = () => {
     if (!activeStory || !charForm.name.trim()) return;
 
     const charId = charForm.id || charForm.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const isExisting = selectedChar?.id === charId;
+    let gallery = isExisting ? selectedChar.gallery || [] : [];
+    const imageUrl = charForm.image_url || selectedChar?.image_url || '';
+    if (imageUrl && gallery.length === 0 && !gallery.includes(imageUrl)) {
+      gallery = [...gallery, imageUrl];
+    }
     const payload = {
       ...selectedChar,
       ...charForm,
       id: charId,
-      timeline_events: selectedChar?.id === charId ? selectedChar.timeline_events : [],
-      plot_point_ids: selectedChar?.id === charId ? selectedChar.plot_point_ids : [],
-      gallery: selectedChar?.id === charId ? selectedChar.gallery || [] : [],
-      notes: selectedChar?.id === charId ? selectedChar.notes || [] : [],
-      artifact_ids: selectedChar?.id === charId ? selectedChar.artifact_ids || [] : [],
+      timeline_events: isExisting ? selectedChar.timeline_events : [],
+      plot_point_ids: isExisting ? selectedChar.plot_point_ids : [],
+      gallery,
+      notes: isExisting ? selectedChar.notes || [] : [],
+      quotes: isExisting ? selectedChar.quotes || [] : [],
+      artifact_ids: isExisting ? selectedChar.artifact_ids || [] : [],
     };
 
     try {
@@ -397,6 +433,55 @@ export const CharacterRosterView = () => {
       : selectedChar.bio ? [selectedChar.bio] : [];
     const notes = current.filter((_, i) => i !== idx);
     await persistCharacter({ ...selectedChar, notes, bio: '' });
+  };
+
+  const handleAddQuote = async () => {
+    if (!selectedChar || !quoteDraft.trim()) return;
+    const quotes = [...(selectedChar.quotes || []), quoteDraft.trim()];
+    const saved = await persistCharacter({ ...selectedChar, quotes });
+    if (saved) {
+      setQuoteDraft('');
+      setShowQuoteInput(false);
+    }
+  };
+
+  const handleDeleteQuote = async (idx) => {
+    if (!selectedChar) return;
+    const quotes = (selectedChar.quotes || []).filter((_, i) => i !== idx);
+    await persistCharacter({ ...selectedChar, quotes });
+  };
+
+  const startEditQuote = (idx, text) => {
+    setEditingQuoteIdx(idx);
+    setEditingQuoteDraft(text);
+  };
+
+  const handleUpdateQuote = async (idx) => {
+    if (!selectedChar || !editingQuoteDraft.trim()) return;
+    const quotes = (selectedChar.quotes || []).map((q, i) => (i === idx ? editingQuoteDraft.trim() : q));
+    const saved = await persistCharacter({ ...selectedChar, quotes });
+    if (saved) {
+      setEditingQuoteIdx(null);
+      setEditingQuoteDraft('');
+    }
+  };
+
+  const startEditNote = (idx, text) => {
+    setEditingNoteIdx(idx);
+    setEditingNoteDraft(text);
+  };
+
+  const handleUpdateNote = async (idx) => {
+    if (!selectedChar || !editingNoteDraft.trim()) return;
+    const current = selectedChar.notes && selectedChar.notes.length > 0
+      ? selectedChar.notes
+      : selectedChar.bio ? [selectedChar.bio] : [];
+    const notes = current.map((n, i) => (i === idx ? editingNoteDraft.trim() : n));
+    const saved = await persistCharacter({ ...selectedChar, notes, bio: '' });
+    if (saved) {
+      setEditingNoteIdx(null);
+      setEditingNoteDraft('');
+    }
   };
 
   const handleAddTimelineEvent = async (e) => {
@@ -470,7 +555,7 @@ export const CharacterRosterView = () => {
 
         <button
           onClick={() => {
-            setCharForm({ id: '', name: '', role: 'Protagonist', image_url: '', bio: '' });
+            setCharForm({ id: '', name: '', role: 'Protagonist', location: '', image_url: '', bio: '' });
             setImageSourceMode('upload');
             setShowCharModal(true);
           }}
@@ -519,6 +604,12 @@ export const CharacterRosterView = () => {
                         <span className="inline-block rounded-md bg-black/40 backdrop-blur-sm px-2 py-0.5 text-[10px] font-semibold text-white/90 mt-0.5">
                           {char.role || 'Main Roster'}
                         </span>
+                        {char.location && (
+                          <div className="mt-0.5 flex items-center gap-1 text-[10px] font-semibold text-white/80">
+                            <MapPin className="h-3 w-3" />
+                            <span className="truncate">{char.location}</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -577,7 +668,7 @@ export const CharacterRosterView = () => {
             })}
             <button
               onClick={() => {
-                setCharForm({ id: '', name: '', role: 'Protagonist', image_url: '', bio: '' });
+                setCharForm({ id: '', name: '', role: 'Protagonist', location: '', image_url: '', bio: '' });
                 setImageSourceMode('upload');
                 setShowCharModal(true);
               }}
@@ -624,6 +715,7 @@ export const CharacterRosterView = () => {
                           id: selectedChar.id,
                           name: selectedChar.name,
                           role: selectedChar.role || 'Protagonist',
+                          location: selectedChar.location || '',
                           image_url: selectedChar.image_url || '',
                           bio: selectedChar.bio || '',
                         });
@@ -656,6 +748,12 @@ export const CharacterRosterView = () => {
                         <Award className="h-3.5 w-3.5" />
                         {selectedChar.role || 'Character'}
                       </span>
+                      {selectedChar.location && (
+                        <span className="inline-flex items-center gap-1 rounded-lg bg-[var(--bg-base)] px-3 py-1 text-xs font-semibold text-[var(--text-muted)] border border-[var(--border-subtle)] mt-1 ml-1.5">
+                          <MapPin className="h-3.5 w-3.5 text-[var(--accent)]" />
+                          {selectedChar.location}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -753,16 +851,172 @@ export const CharacterRosterView = () => {
                           <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[var(--accent)]/10 text-[10px] font-bold text-[var(--accent)]">
                             {idx + 1}
                           </span>
-                          <p className="flex-1 whitespace-pre-wrap text-sm text-[var(--text-muted)] leading-relaxed font-prose">
-                            {note}
-                          </p>
+                          {editingNoteIdx === idx ? (
+                            <>
+                              <textarea
+                                value={editingNoteDraft}
+                                onChange={(e) => setEditingNoteDraft(e.target.value)}
+                                rows={3}
+                                autoFocus
+                                className="flex-1 whitespace-pre-wrap rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden resize-y"
+                              />
+                              <div className="flex flex-col gap-1 pt-0.5">
+                                <button
+                                  onClick={() => handleUpdateNote(idx)}
+                                  disabled={!editingNoteDraft.trim()}
+                                  className="rounded-md p-1 text-[var(--accent)] hover:bg-[var(--accent-light)] disabled:opacity-40 disabled:cursor-not-allowed"
+                                  title="Save note"
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => { setEditingNoteIdx(null); setEditingNoteDraft(''); }}
+                                  className="rounded-md p-1 text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500"
+                                  title="Cancel edit"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <p className="flex-1 whitespace-pre-wrap text-sm text-[var(--text-muted)] leading-relaxed font-prose">
+                                {note}
+                              </p>
+                              <div className="mt-0.5 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                <button
+                                  onClick={() => startEditNote(idx, note)}
+                                  className="rounded-md p-1 text-[var(--text-dim)] hover:bg-[var(--accent-light)] hover:text-[var(--accent)]"
+                                  title="Edit note"
+                                >
+                                  <Edit3 className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteNote(idx)}
+                                  className="rounded-md p-1 text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500"
+                                  title="Delete note"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {activeDetailTab === 'quotes' && (
+                    <div className="literary-card rounded-2xl p-6 space-y-3">
+                      <div className="flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] pb-3">
+                        <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                          <Quote className="h-3.5 w-3.5 text-[var(--accent)]" />
+                          Quotes ({selectedChar.quotes?.length || 0})
+                        </span>
+                        {!showQuoteInput && (
                           <button
-                            onClick={() => handleDeleteNote(idx)}
-                            className="mt-0.5 rounded-md p-1 text-[var(--text-dim)] opacity-0 group-hover:opacity-100 hover:bg-red-500/10 hover:text-red-500 transition-all"
-                            title="Delete note"
+                            onClick={() => setShowQuoteInput(true)}
+                            className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-[var(--accent-hover)] transition-all"
                           >
-                            <Trash2 className="h-3.5 w-3.5" />
+                            <Plus className="h-3.5 w-3.5" />
+                            Add Quote
                           </button>
+                        )}
+                      </div>
+
+                      {showQuoteInput && (
+                        <div className="space-y-2 rounded-xl border border-[var(--accent)]/40 bg-[var(--accent-light)]/40 p-3 animate-in fade-in zoom-in-95">
+                          <textarea
+                            value={quoteDraft}
+                            onChange={(e) => setQuoteDraft(e.target.value)}
+                            placeholder={`A memorable line spoken by ${selectedChar.name}...`}
+                            rows={3}
+                            autoFocus
+                            className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs font-prose italic text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden resize-y"
+                          />
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setQuoteDraft('');
+                                setShowQuoteInput(false);
+                              }}
+                              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleAddQuote}
+                              disabled={!quoteDraft.trim()}
+                              className="flex items-center gap-1 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-[var(--accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                              Save Quote
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {(selectedChar.quotes || []).length === 0 && (
+                        <p className="text-xs italic text-[var(--text-dim)]">
+                          No quotes saved yet. Add a line worth remembering (or showing off on the story board).
+                        </p>
+                      )}
+
+                      {(selectedChar.quotes || []).map((quote, idx) => (
+                        <div key={idx} className="group flex items-start gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3">
+                          <Quote className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
+                          {editingQuoteIdx === idx ? (
+                            <>
+                              <textarea
+                                value={editingQuoteDraft}
+                                onChange={(e) => setEditingQuoteDraft(e.target.value)}
+                                rows={3}
+                                autoFocus
+                                className="flex-1 whitespace-pre-wrap rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-2 text-sm font-prose italic text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden resize-y"
+                              />
+                              <div className="flex flex-col gap-1 pt-0.5">
+                                <button
+                                  onClick={() => handleUpdateQuote(idx)}
+                                  disabled={!editingQuoteDraft.trim()}
+                                  className="rounded-md p-1 text-[var(--accent)] hover:bg-[var(--accent-light)] disabled:opacity-40 disabled:cursor-not-allowed"
+                                  title="Save quote"
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => { setEditingQuoteIdx(null); setEditingQuoteDraft(''); }}
+                                  className="rounded-md p-1 text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500"
+                                  title="Cancel edit"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <p className="flex-1 whitespace-pre-wrap text-sm font-prose italic text-[var(--text-main)] leading-relaxed">
+                                "{quote}"
+                              </p>
+                              <div className="mt-0.5 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                <button
+                                  onClick={() => startEditQuote(idx, quote)}
+                                  className="rounded-md p-1 text-[var(--text-dim)] hover:bg-[var(--accent-light)] hover:text-[var(--accent)]"
+                                  title="Edit quote"
+                                >
+                                  <Edit3 className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteQuote(idx)}
+                                  className="rounded-md p-1 text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500"
+                                  title="Delete quote"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1241,6 +1495,32 @@ export const CharacterRosterView = () => {
                   <option value="Mentor">Mentor</option>
                   <option value="Ally">Ally</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                  Home / Origin Location
+                </label>
+                <input
+                  type="text"
+                  list="character-cities-list"
+                  value={charForm.location}
+                  onChange={(e) => setCharForm({ ...charForm, location: e.target.value })}
+                  placeholder="e.g. Oakhaven Spire"
+                  className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                />
+                {storyCities.length > 0 && (
+                  <datalist id="character-cities-list">
+                    {storyCities.map((c) => (
+                      <option key={c.id} value={c.name} />
+                    ))}
+                  </datalist>
+                )}
+                {storyCities.length > 0 && (
+                  <p className="mt-1 text-[10px] text-[var(--text-dim)]">
+                    Tip: pick a city/location from the story's Cities &amp; Locations section.
+                  </p>
+                )}
               </div>
 
               {/* Image Source Mode Toggle */}

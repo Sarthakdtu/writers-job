@@ -109,10 +109,13 @@ Per-feature method groups (all either read `read_json_safe`/`read_text_safe` or 
   `localStorage['writer_theme']`.
 
 ### 3.2 View behaviors (what each does, so refactors stay correct)
-- **DashboardView:** lists stories filtered by `selectedTag`; per-card background URL
-  editor and tag add/remove. Non-active stories updated via direct `PUT
-  /api/stories/{id}` with `{...target, field}`; active story via
-  `updateActiveStory({...})` (which PUTs under the hood).
+- **HomeView:** lists all stories filtered by `selectedTag`; per-card background URL
+  editor and tag add/remove; "New Story" creation. Opening a story selects it and
+  navigates to its dashboard (`home` is the default tab).
+- **DashboardView:** dedicated to the active story. Header + tags, a **Story Overview**
+  editor (add/remove paragraphs persisted on `Story.overview`, mirroring char notes), a
+  **Summary · Fun Fact** card (fetches `GET .../fun-facts` and shuffles client-side), and
+  the story's aesthetic theme picker (`updateActiveStory({ theme })`).
 - **WorldbuildingView:** `activeSection` state drives which `world/<section>` is fetched
   and which form/modal renders. `mechanics` renders an **object** form; all other
   sections array-card grids. `saveSectionData` PUTs the whole array/object.
