@@ -69,6 +69,30 @@ def delete_story(story_id: str):
     return {"message": f"Story '{story_id}' deleted successfully"}
 
 
+# --- Asset Upload & Serving Endpoints ---
+
+from fastapi import File, UploadFile
+from fastapi.responses import FileResponse
+
+
+@app.post("/api/stories/{story_id}/assets/upload")
+async def upload_story_asset(story_id: str, file: UploadFile = File(...)):
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    file_bytes = await file.read()
+    asset_url = file_manager.save_asset(story_id, file_bytes, file.filename)
+    return {"url": asset_url, "filename": file.filename}
+
+
+@app.get("/api/stories/{story_id}/assets/{filename}")
+def get_story_asset(story_id: str, filename: str):
+    path = file_manager.get_asset_path(story_id, filename)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return FileResponse(path)
+
+
 # --- 2. Character Endpoints ---
 
 @app.get("/api/stories/{story_id}/characters", response_model=List[Character])

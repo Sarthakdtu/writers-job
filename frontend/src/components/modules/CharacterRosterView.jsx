@@ -13,7 +13,10 @@ import {
   X,
   Sparkles,
   Award,
-  Layers
+  Layers,
+  Upload,
+  Link as LinkIcon,
+  ImageIcon
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
 
@@ -27,6 +30,10 @@ export const CharacterRosterView = () => {
   // Modals
   const [showCharModal, setShowCharModal] = useState(false);
   const [showEventModal, setShowEventModal] = useState(false);
+
+  // Image source mode: 'upload' | 'url'
+  const [imageSourceMode, setImageSourceMode] = useState('upload');
+  const [uploading, setUploading] = useState(false);
 
   // Character Form
   const [charForm, setCharForm] = useState({
@@ -86,6 +93,35 @@ export const CharacterRosterView = () => {
       fetchAppearances(selectedChar.id);
     }
   }, [selectedChar, activeStory]);
+
+  // Handle local image file upload
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeStory) return;
+
+    try {
+      setUploading(true);
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch(`/api/stories/${activeStory.id}/assets/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setCharForm((prev) => ({ ...prev, image_url: data.url }));
+      } else {
+        alert(`Upload failed (${res.status}). Please try again.`);
+      }
+    } catch (err) {
+      console.error('Failed to upload character image:', err);
+      alert('Upload failed. Check that the backend server is running.');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const handleSaveCharacter = async (e) => {
     e.preventDefault();
@@ -188,13 +224,14 @@ export const CharacterRosterView = () => {
             Characters of {activeStory.title}
           </h1>
           <p className="text-xs text-[var(--text-muted)] mt-1">
-            Profile cards, chronological timeline events, and cross-chapter appearances matrix.
+            Profile cards, local image uploads, chronological timeline events, and cross-chapter appearances matrix.
           </p>
         </div>
 
         <button
           onClick={() => {
             setCharForm({ id: '', name: '', role: 'Protagonist', image_url: '', bio: '' });
+            setImageSourceMode('upload');
             setShowCharModal(true);
           }}
           className="flex items-center gap-2 rounded-xl bg-[var(--accent)] px-4 py-2.5 text-xs font-semibold text-white shadow-md hover:bg-[var(--accent-hover)] transition-all cursor-pointer shrink-0"
@@ -225,28 +262,30 @@ export const CharacterRosterView = () => {
                 <div
                   key={char.id}
                   onClick={() => setSelectedChar(char)}
-                  className={`literary-card rounded-xl p-4 cursor-pointer transition-all flex items-center gap-4 ${
+                  className={`literary-card rounded-2xl cursor-pointer transition-all overflow-hidden ${
                     isSelected
-                      ? 'border-2 border-[var(--accent)] bg-[var(--accent-light)] shadow-md'
-                      : 'hover:border-[var(--accent)]'
+                      ? 'border-2 border-[var(--accent)] shadow-lg ring-2 ring-[var(--accent)]/20'
+                      : 'hover:border-[var(--accent)] hover:shadow-md'
                   }`}
                 >
-                  {/* Avatar Circle */}
-                  <div className="h-12 w-12 rounded-full overflow-hidden bg-[var(--bg-base)] border border-[var(--border-color)] shrink-0 flex items-center justify-center font-prose font-bold text-lg text-[var(--accent)]">
+                  {/* Large Character Portrait */}
+                  <div className="h-44 w-full relative overflow-hidden bg-[var(--bg-base)]">
                     {char.image_url ? (
-                      <img src={char.image_url} alt={char.name} className="h-full w-full object-cover" />
+                      <img src={char.image_url} alt={char.name} className="h-full w-full object-cover transition-transform duration-500 hover:scale-105" />
                     ) : (
-                      char.name.charAt(0).toUpperCase()
+                      <div className="h-full w-full flex items-center justify-center font-prose font-bold text-5xl text-[var(--accent)]/30 bg-gradient-to-br from-[var(--accent-light)] to-[var(--bg-base)]">
+                        {char.name.charAt(0).toUpperCase()}
+                      </div>
                     )}
-                  </div>
-
-                  <div className="flex-1 truncate">
-                    <div className="font-prose text-base font-bold text-[var(--text-main)] truncate">
-                      {char.name}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                    <div className="absolute bottom-0 left-0 right-0 p-3">
+                      <div className="font-prose text-base font-bold text-white drop-shadow-md truncate">
+                        {char.name}
+                      </div>
+                      <span className="inline-block rounded-md bg-black/40 backdrop-blur-sm px-2 py-0.5 text-[10px] font-semibold text-white/90 mt-0.5">
+                        {char.role || 'Main Roster'}
+                      </span>
                     </div>
-                    <span className="inline-block rounded-md bg-[var(--bg-card)] px-2 py-0.5 text-[10px] font-semibold text-[var(--accent)] border border-[var(--border-subtle)] mt-0.5">
-                      {char.role || 'Main Roster'}
-                    </span>
                   </div>
                 </div>
               );
@@ -258,21 +297,55 @@ export const CharacterRosterView = () => {
         <div className="lg:col-span-8 space-y-6">
           {selectedChar ? (
             <>
-              {/* Profile Card Header */}
-              <div className="literary-card rounded-2xl p-6 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                  <div className="flex items-center gap-4">
-                    <div className="h-20 w-20 rounded-2xl overflow-hidden bg-[var(--bg-base)] border-2 border-[var(--accent)] shadow-md flex items-center justify-center font-prose font-bold text-3xl text-[var(--accent)]">
-                      {selectedChar.image_url ? (
-                        <img
-                          src={selectedChar.image_url}
-                          alt={selectedChar.name}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        selectedChar.name.charAt(0).toUpperCase()
-                      )}
+              {/* Profile Card Header with Large Hero Portrait */}
+              <div className="literary-card rounded-2xl overflow-hidden">
+                {/* Hero Portrait */}
+                <div className="relative h-72 w-full overflow-hidden bg-[var(--bg-base)]">
+                  {selectedChar.image_url ? (
+                    <img
+                      src={selectedChar.image_url}
+                      alt={selectedChar.name}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="h-full w-full flex items-center justify-center font-prose font-bold text-8xl text-[var(--accent)]/20 bg-gradient-to-br from-[var(--accent-light)] to-[var(--bg-base)]">
+                      {selectedChar.name.charAt(0).toUpperCase()}
                     </div>
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-card)] via-transparent to-transparent" />
+
+                  {/* Action buttons overlay */}
+                  <div className="absolute top-4 right-4 flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setCharForm({
+                          id: selectedChar.id,
+                          name: selectedChar.name,
+                          role: selectedChar.role || 'Protagonist',
+                          image_url: selectedChar.image_url || '',
+                          bio: selectedChar.bio || '',
+                        });
+                        setImageSourceMode(selectedChar.image_url?.startsWith('/api/stories/') ? 'upload' : 'url');
+                        setShowCharModal(true);
+                      }}
+                      className="p-2 rounded-lg bg-black/40 backdrop-blur-sm text-white hover:bg-[var(--accent)] transition-colors"
+                      title="Edit Character"
+                    >
+                      <Edit3 className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteCharacter(selectedChar.id)}
+                      className="p-2 rounded-lg bg-black/40 backdrop-blur-sm text-white hover:bg-red-500 transition-colors"
+                      title="Delete Character"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Name & Role Bar */}
+                <div className="p-6 space-y-3">
+                  <div className="flex items-center justify-between">
                     <div>
                       <h2 className="font-prose text-2xl font-bold text-[var(--text-main)]">
                         {selectedChar.name}
@@ -284,38 +357,12 @@ export const CharacterRosterView = () => {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        setCharForm({
-                          id: selectedChar.id,
-                          name: selectedChar.name,
-                          role: selectedChar.role || 'Protagonist',
-                          image_url: selectedChar.image_url || '',
-                          bio: selectedChar.bio || '',
-                        });
-                        setShowCharModal(true);
-                      }}
-                      className="p-2 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] transition-colors"
-                      title="Edit Character"
-                    >
-                      <Edit3 className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteCharacter(selectedChar.id)}
-                      className="p-2 rounded-lg text-[var(--text-muted)] hover:bg-red-500/10 hover:text-red-500 transition-colors"
-                      title="Delete Character"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
+                  {selectedChar.bio && (
+                    <p className="text-sm text-[var(--text-muted)] leading-relaxed font-prose border-t border-[var(--border-subtle)] pt-3">
+                      {selectedChar.bio}
+                    </p>
+                  )}
                 </div>
-
-                {selectedChar.bio && (
-                  <p className="text-sm text-[var(--text-muted)] leading-relaxed font-prose border-t border-[var(--border-subtle)] pt-3">
-                    {selectedChar.bio}
-                  </p>
-                )}
               </div>
 
               {/* Appearances Matrix Section */}
@@ -424,7 +471,6 @@ export const CharacterRosterView = () => {
                   {selectedChar.timeline_events && selectedChar.timeline_events.length > 0 ? (
                     selectedChar.timeline_events.map((evt, idx) => (
                       <div key={idx} className="relative group animate-in fade-in">
-                        {/* Bullet Node Indicator */}
                         <div className="absolute -left-[31px] top-1 h-4 w-4 rounded-full bg-[var(--accent)] ring-4 ring-[var(--bg-card)] transition-transform group-hover:scale-125" />
 
                         <div className="literary-card rounded-xl p-4 space-y-1 hover:border-[var(--accent)] transition-all">
@@ -456,7 +502,7 @@ export const CharacterRosterView = () => {
                     ))
                   ) : (
                     <div className="text-xs italic text-[var(--text-dim)]">
-                      No timeline events added yet. Click 'Add Timeline Event' to record key moments in this character's arc.
+                      No timeline events added yet. Click 'Add Timeline Event' to record key moments.
                     </div>
                   )}
                 </div>
@@ -470,7 +516,7 @@ export const CharacterRosterView = () => {
         </div>
       </div>
 
-      {/* Character Create/Edit Modal */}
+      {/* Character Create/Edit Modal with Local Upload or External URL */}
       {showCharModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
           <div className="w-full max-w-lg rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] p-6 shadow-2xl space-y-4">
@@ -493,37 +539,104 @@ export const CharacterRosterView = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
-                    Primary Role
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                  Primary Role
+                </label>
+                <select
+                  value={charForm.role}
+                  onChange={(e) => setCharForm({ ...charForm, role: e.target.value })}
+                  className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                >
+                  <option value="Protagonist">Protagonist</option>
+                  <option value="Antagonist">Antagonist</option>
+                  <option value="Deuteragonist">Deuteragonist</option>
+                  <option value="Supporting">Supporting</option>
+                  <option value="Mentor">Mentor</option>
+                  <option value="Ally">Ally</option>
+                </select>
+              </div>
+
+              {/* Image Source Mode Toggle */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-semibold text-[var(--text-muted)]">
+                    Character Portrait Image
                   </label>
-                  <select
-                    value={charForm.role}
-                    onChange={(e) => setCharForm({ ...charForm, role: e.target.value })}
-                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
-                  >
-                    <option value="Protagonist">Protagonist</option>
-                    <option value="Antagonist">Antagonist</option>
-                    <option value="Deuteragonist">Deuteragonist</option>
-                    <option value="Supporting">Supporting</option>
-                    <option value="Mentor">Mentor</option>
-                    <option value="Ally">Ally</option>
-                  </select>
+                  <div className="flex items-center gap-1 bg-[var(--bg-base)] p-0.5 rounded-lg border border-[var(--border-subtle)]">
+                    <button
+                      type="button"
+                      onClick={() => setImageSourceMode('upload')}
+                      className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold transition-all cursor-pointer ${
+                        imageSourceMode === 'upload'
+                          ? 'bg-[var(--accent)] text-white'
+                          : 'text-[var(--text-muted)]'
+                      }`}
+                    >
+                      <Upload className="h-3 w-3" />
+                      <span>Upload Local File</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setImageSourceMode('url')}
+                      className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold transition-all cursor-pointer ${
+                        imageSourceMode === 'url'
+                          ? 'bg-[var(--accent)] text-white'
+                          : 'text-[var(--text-muted)]'
+                      }`}
+                    >
+                      <LinkIcon className="h-3 w-3" />
+                      <span>Image URL Link</span>
+                    </button>
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
-                    Avatar Image URL
-                  </label>
+                {imageSourceMode === 'upload' ? (
+                  <div className="border-2 border-dashed border-[var(--border-color)] rounded-xl p-3 bg-[var(--bg-base)] text-center space-y-2">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                      id="character-image-file-input"
+                    />
+                    <label
+                      htmlFor="character-image-file-input"
+                      className="cursor-pointer inline-flex items-center gap-2 rounded-lg bg-[var(--accent-light)] px-3 py-1.5 text-xs font-semibold text-[var(--accent)] border border-[var(--border-subtle)] hover:bg-[var(--accent)] hover:text-white transition-all"
+                    >
+                      <Upload className="h-3.5 w-3.5" />
+                      <span>{uploading ? 'Uploading...' : 'Choose Image File from Computer'}</span>
+                    </label>
+                    <p className="text-[10px] text-[var(--text-dim)]">
+                      Saves portrait locally inside `/data/stories/${activeStory.id}/assets/`
+                    </p>
+                  </div>
+                ) : (
                   <input
                     type="url"
                     value={charForm.image_url}
                     onChange={(e) => setCharForm({ ...charForm, image_url: e.target.value })}
-                    placeholder="https://..."
+                    placeholder="https://images.unsplash.com/photo-..."
                     className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
                   />
-                </div>
+                )}
+
+                {/* Preview Thumbnail */}
+                {charForm.image_url && (
+                  <div className="flex items-center gap-3 p-2 rounded-lg bg-[var(--bg-base)] border border-[var(--border-subtle)]">
+                    <img src={charForm.image_url} alt="Preview" className="h-10 w-10 rounded-lg object-cover border border-[var(--accent)]" />
+                    <div className="flex-1 truncate text-[11px] font-mono text-[var(--text-muted)]">
+                      {charForm.image_url}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setCharForm({ ...charForm, image_url: '' })}
+                      className="text-red-500 p-1 hover:bg-red-500/10 rounded-md"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div>

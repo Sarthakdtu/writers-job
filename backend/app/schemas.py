@@ -56,6 +56,14 @@ class GlossaryTerm(BaseModel):
     category: str
 
 
+class GalleryItem(BaseModel):
+    id: str
+    title: str
+    image_url: str
+    context: str
+    category: Optional[str] = "Concept Art"
+
+
 class PlotSubsection(BaseModel):
     title: str
     description: str

@@ -47,6 +47,7 @@ class FileManager:
 
         # Create subdirectories
         (story_dir / "characters").mkdir(exist_ok=True)
+        (story_dir / "assets").mkdir(exist_ok=True)
         world_dir = story_dir / "world"
         world_dir.mkdir(exist_ok=True)
         (story_dir / "books").mkdir(exist_ok=True)
@@ -61,7 +62,8 @@ class FileManager:
             },
             "factions.json": [],
             "artifacts.json": [],
-            "glossary.json": []
+            "glossary.json": [],
+            "gallery.json": []
         }
 
         for filename, default_val in world_files_defaults.items():
@@ -109,6 +111,27 @@ class FileManager:
                 print(f"[FileManager Error] Failed to delete story dir {story_dir}: {e}")
                 return False
         return False
+
+    # --- Asset Operations ---
+
+    def save_asset(self, story_slug: str, file_bytes: bytes, original_filename: str) -> str:
+        """Saves a local image asset into /data/stories/[story-slug]/assets/ and returns asset URL."""
+        import uuid
+        story_dir = self.ensure_story_structure(story_slug)
+        assets_dir = story_dir / "assets"
+        assets_dir.mkdir(exist_ok=True)
+
+        clean_ext = Path(original_filename).suffix.lower() or ".jpg"
+        unique_filename = f"{uuid.uuid4().hex[:10]}{clean_ext}"
+        target_path = assets_dir / unique_filename
+
+        with open(target_path, "wb") as f:
+            f.write(file_bytes)
+
+        return f"/api/stories/{story_slug}/assets/{unique_filename}"
+
+    def get_asset_path(self, story_slug: str, filename: str) -> Path:
+        return self.get_story_dir(story_slug) / "assets" / filename
 
     # --- Character Operations ---
 

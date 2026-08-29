@@ -5,12 +5,16 @@ import {
   Zap,
   Shield,
   Book,
+  Image as ImageIcon,
   Plus,
   Trash2,
   Edit3,
   Save,
   Check,
-  Sparkles
+  Sparkles,
+  Upload,
+  Link as LinkIcon,
+  X
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
 
@@ -23,18 +27,22 @@ export const WorldbuildingView = () => {
 
   // Modal forms
   const [showItemModal, setShowItemModal] = useState(false);
+  const [imageSourceMode, setImageSourceMode] = useState('upload');
+  const [uploading, setUploading] = useState(false);
 
   // Form states for items
   const [cityForm, setCityForm] = useState({ id: '', name: '', region: '', atmosphere: '', key_locations: '' });
   const [mechanicsForm, setMechanicsForm] = useState({ magic_system: '', technology_level: '', global_rules: '' });
   const [factionForm, setFactionForm] = useState({ id: '', name: '', description: '', leader: '', alignment: '' });
   const [glossaryForm, setGlossaryForm] = useState({ id: '', term: '', definition: '', category: '' });
+  const [galleryForm, setGalleryForm] = useState({ id: '', title: '', image_url: '', context: '', category: 'Concept Art' });
 
   const sections = [
     { id: 'cities', name: 'Cities & Locations', icon: MapPin, desc: 'Regions, cities, and landmarks' },
     { id: 'mechanics', name: 'Magic & Mechanics', icon: Zap, desc: 'Rules, magic systems, technology' },
     { id: 'factions', name: 'Factions & Guilds', icon: Shield, desc: 'Organisations, houses, alliances' },
     { id: 'glossary', name: 'Lexicon & Glossary', icon: Book, desc: 'World terms, languages, jargon' },
+    { id: 'gallery', name: 'Gallery & Concept Art', icon: ImageIcon, desc: 'Artwork, maps, relics, and lore context' },
   ];
 
   const fetchSectionData = async () => {
@@ -85,6 +93,32 @@ export const WorldbuildingView = () => {
     }
   };
 
+  // Upload Asset for Gallery or Cities
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeStory) return;
+
+    try {
+      setUploading(true);
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch(`/api/stories/${activeStory.id}/assets/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setGalleryForm((prev) => ({ ...prev, image_url: data.url }));
+      }
+    } catch (err) {
+      console.error('Failed to upload image:', err);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   // Submit City
   const handleSaveCity = (e) => {
     e.preventDefault();
@@ -124,6 +158,22 @@ export const WorldbuildingView = () => {
       term: glossaryForm.term,
       definition: glossaryForm.definition,
       category: glossaryForm.category || 'General',
+    };
+    const current = Array.isArray(data) ? data : [];
+    const updated = [...current.filter((item) => item.id !== newItem.id), newItem];
+    saveSectionData(updated);
+  };
+
+  // Submit Gallery Item
+  const handleSaveGallery = (e) => {
+    e.preventDefault();
+    if (!galleryForm.title.trim() || !galleryForm.image_url.trim()) return;
+    const newItem = {
+      id: galleryForm.id || galleryForm.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      title: galleryForm.title,
+      image_url: galleryForm.image_url,
+      context: galleryForm.context,
+      category: galleryForm.category || 'Concept Art',
     };
     const current = Array.isArray(data) ? data : [];
     const updated = [...current.filter((item) => item.id !== newItem.id), newItem];
@@ -171,7 +221,7 @@ export const WorldbuildingView = () => {
             World of {activeStory.title}
           </h1>
           <p className="text-xs text-[var(--text-muted)] mt-1">
-            Manage world rules, cities, factions, and universe glossary. Syncs directly to `/world/`.
+            Manage world rules, cities, factions, universe glossary, and concept art gallery with lore context.
           </p>
         </div>
 
@@ -181,6 +231,8 @@ export const WorldbuildingView = () => {
               setCityForm({ id: '', name: '', region: '', atmosphere: '', key_locations: '' });
               setFactionForm({ id: '', name: '', description: '', leader: '', alignment: '' });
               setGlossaryForm({ id: '', term: '', definition: '', category: 'General' });
+              setGalleryForm({ id: '', title: '', image_url: '', context: '', category: 'Concept Art' });
+              setImageSourceMode('upload');
               setShowItemModal(true);
             }}
             className="flex items-center gap-2 rounded-xl bg-[var(--accent)] px-4 py-2.5 text-xs font-semibold text-white shadow-md hover:bg-[var(--accent-hover)] transition-all cursor-pointer shrink-0"
@@ -272,7 +324,7 @@ export const WorldbuildingView = () => {
           </div>
         )}
 
-        {/* 2. MAGIC & MECHANICS TAB (Inline Editable Form) */}
+        {/* 2. MAGIC & MECHANICS TAB */}
         {activeSection === 'mechanics' && (
           <div className="literary-card rounded-2xl p-6 md:p-8 space-y-6 max-w-3xl">
             <h3 className="font-prose text-xl font-bold text-[var(--text-main)] flex items-center gap-2">
@@ -419,6 +471,55 @@ export const WorldbuildingView = () => {
             )}
           </div>
         )}
+
+        {/* 5. GALLERY & CONCEPT ART TAB */}
+        {activeSection === 'gallery' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {Array.isArray(data) && data.length > 0 ? (
+              data.map((art) => (
+                <div key={art.id} className="literary-card rounded-2xl overflow-hidden flex flex-col justify-between group">
+                  {/* Artwork Image Container */}
+                  <div className="h-48 w-full relative overflow-hidden bg-[var(--bg-base)] border-b border-[var(--border-subtle)]">
+                    <img
+                      src={art.image_url}
+                      alt={art.title}
+                      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                    
+                    <span className="absolute top-3 left-3 rounded-lg bg-black/60 backdrop-blur-xs px-2.5 py-1 text-[10px] font-bold text-white uppercase tracking-wider">
+                      {art.category || 'Concept Art'}
+                    </span>
+
+                    <button
+                      onClick={() => handleDeleteItem(art.id)}
+                      className="absolute top-3 right-3 p-1.5 rounded-lg bg-black/60 text-white hover:bg-red-600 transition-colors"
+                      title="Delete Artwork"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Lore Context & Details */}
+                  <div className="p-5 flex-1 space-y-2">
+                    <h3 className="font-prose text-lg font-bold text-[var(--text-main)]">
+                      {art.title}
+                    </h3>
+                    {art.context && (
+                      <p className="text-xs text-[var(--text-muted)] leading-relaxed font-prose">
+                        {art.context}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="col-span-full p-12 literary-card rounded-2xl text-center text-xs text-[var(--text-muted)]">
+                No artwork or concept art added yet. Click 'Add New Entry' to upload images and add lore context.
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Item Modal */}
@@ -426,7 +527,7 @@ export const WorldbuildingView = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
           <div className="w-full max-w-lg rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] p-6 shadow-2xl space-y-4">
             <h3 className="font-prose text-xl font-bold text-[var(--text-main)]">
-              Add {activeSection.substring(0, 1).toUpperCase() + activeSection.substring(1)} Entry
+              Add {activeSection === 'gallery' ? 'Gallery Artwork' : activeSection.substring(0, 1).toUpperCase() + activeSection.substring(1)} Entry
             </h3>
 
             {/* City Form */}
@@ -628,6 +729,153 @@ export const WorldbuildingView = () => {
                     className="rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white hover:bg-[var(--accent-hover)]"
                   >
                     Save Term
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Gallery Form */}
+            {activeSection === 'gallery' && (
+              <form onSubmit={handleSaveGallery} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                      Artwork Title
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={galleryForm.title}
+                      onChange={(e) => setGalleryForm({ ...galleryForm, title: e.target.value })}
+                      placeholder="e.g. Map of the Northern Reach"
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                      Category
+                    </label>
+                    <select
+                      value={galleryForm.category}
+                      onChange={(e) => setGalleryForm({ ...galleryForm, category: e.target.value })}
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                    >
+                      <option value="Maps">Maps</option>
+                      <option value="Landscapes">Landscapes</option>
+                      <option value="Architecture">Architecture</option>
+                      <option value="Relics & Weapons">Relics & Weapons</option>
+                      <option value="Concept Art">Concept Art</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Image Source Mode Toggle */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-semibold text-[var(--text-muted)]">
+                      Artwork Image
+                    </label>
+                    <div className="flex items-center gap-1 bg-[var(--bg-base)] p-0.5 rounded-lg border border-[var(--border-subtle)]">
+                      <button
+                        type="button"
+                        onClick={() => setImageSourceMode('upload')}
+                        className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold transition-all cursor-pointer ${
+                          imageSourceMode === 'upload'
+                            ? 'bg-[var(--accent)] text-white'
+                            : 'text-[var(--text-muted)]'
+                        }`}
+                      >
+                        <Upload className="h-3 w-3" />
+                        <span>Upload File</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setImageSourceMode('url')}
+                        className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold transition-all cursor-pointer ${
+                          imageSourceMode === 'url'
+                            ? 'bg-[var(--accent)] text-white'
+                            : 'text-[var(--text-muted)]'
+                        }`}
+                      >
+                        <LinkIcon className="h-3 w-3" />
+                        <span>URL Link</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {imageSourceMode === 'upload' ? (
+                    <div className="border-2 border-dashed border-[var(--border-color)] rounded-xl p-3 bg-[var(--bg-base)] text-center space-y-2">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                        id="gallery-image-file-input"
+                      />
+                      <label
+                        htmlFor="gallery-image-file-input"
+                        className="cursor-pointer inline-flex items-center gap-2 rounded-lg bg-[var(--accent-light)] px-3 py-1.5 text-xs font-semibold text-[var(--accent)] border border-[var(--border-subtle)] hover:bg-[var(--accent)] hover:text-white transition-all"
+                      >
+                        <Upload className="h-3.5 w-3.5" />
+                        <span>{uploading ? 'Uploading...' : 'Choose Image File from Computer'}</span>
+                      </label>
+                      <p className="text-[10px] text-[var(--text-dim)]">
+                        Saves asset locally inside `/data/stories/${activeStory.id}/assets/`
+                      </p>
+                    </div>
+                  ) : (
+                    <input
+                      type="url"
+                      value={galleryForm.image_url}
+                      onChange={(e) => setGalleryForm({ ...galleryForm, image_url: e.target.value })}
+                      placeholder="https://images.unsplash.com/photo-..."
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                    />
+                  )}
+
+                  {galleryForm.image_url && (
+                    <div className="flex items-center gap-3 p-2 rounded-lg bg-[var(--bg-base)] border border-[var(--border-subtle)]">
+                      <img src={galleryForm.image_url} alt="Preview" className="h-10 w-10 rounded-lg object-cover border border-[var(--accent)]" />
+                      <div className="flex-1 truncate text-[11px] font-mono text-[var(--text-muted)]">
+                        {galleryForm.image_url}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setGalleryForm({ ...galleryForm, image_url: '' })}
+                        className="text-red-500 p-1 hover:bg-red-500/10 rounded-md"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                    Lore Context & Description
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={galleryForm.context}
+                    onChange={(e) => setGalleryForm({ ...galleryForm, context: e.target.value })}
+                    placeholder="Historical context, geographical significance, or architectural lore..."
+                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowItemModal(false)}
+                    className="rounded-lg px-4 py-2 text-xs font-semibold text-[var(--text-muted)] hover:bg-[var(--bg-hover)]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white hover:bg-[var(--accent-hover)]"
+                  >
+                    Save Artwork
                   </button>
                 </div>
               </form>
