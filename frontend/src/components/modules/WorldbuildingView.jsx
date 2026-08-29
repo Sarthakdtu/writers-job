@@ -6,6 +6,7 @@ import {
   Shield,
   Book,
   Image as ImageIcon,
+  Gem,
   Plus,
   Trash2,
   Edit3,
@@ -14,9 +15,15 @@ import {
   Sparkles,
   Upload,
   Link as LinkIcon,
-  X
+  Users,
+  BookOpen,
+  X,
+  Clock,
+  Search,
+  Tag
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
+import { ArtifactFormModal } from '../ArtifactFormModal';
 
 export const WorldbuildingView = () => {
   const { activeStory } = useStory();
@@ -27,20 +34,30 @@ export const WorldbuildingView = () => {
 
   // Modal forms
   const [showItemModal, setShowItemModal] = useState(false);
+  const [showArtifactModal, setShowArtifactModal] = useState(false);
+  const [editingArtifact, setEditingArtifact] = useState(null);
   const [imageSourceMode, setImageSourceMode] = useState('upload');
   const [uploading, setUploading] = useState(false);
+
+  // Characters (used for artifact "Belongs To" resolution)
+  const [characters, setCharacters] = useState([]);
+
+  // Gallery search + unified image library (gallery items + character images)
+  const [gallerySearch, setGallerySearch] = useState('');
+  const [library, setLibrary] = useState([]);
 
   // Form states for items
   const [cityForm, setCityForm] = useState({ id: '', name: '', region: '', atmosphere: '', key_locations: '' });
   const [mechanicsForm, setMechanicsForm] = useState({ magic_system: '', technology_level: '', global_rules: '' });
   const [factionForm, setFactionForm] = useState({ id: '', name: '', description: '', leader: '', alignment: '' });
   const [glossaryForm, setGlossaryForm] = useState({ id: '', term: '', definition: '', category: '' });
-  const [galleryForm, setGalleryForm] = useState({ id: '', title: '', image_url: '', context: '', category: 'Concept Art' });
+  const [galleryForm, setGalleryForm] = useState({ id: '', title: '', image_url: '', context: '', category: 'Concept Art', tags: '' });
 
   const sections = [
     { id: 'cities', name: 'Cities & Locations', icon: MapPin, desc: 'Regions, cities, and landmarks' },
     { id: 'mechanics', name: 'Magic & Mechanics', icon: Zap, desc: 'Rules, magic systems, technology' },
     { id: 'factions', name: 'Factions & Guilds', icon: Shield, desc: 'Organisations, houses, alliances' },
+    { id: 'artifacts', name: 'Artifacts & Relics', icon: Gem, desc: 'Magic items, weapons, and relics' },
     { id: 'glossary', name: 'Lexicon & Glossary', icon: Book, desc: 'World terms, languages, jargon' },
     { id: 'gallery', name: 'Gallery & Concept Art', icon: ImageIcon, desc: 'Artwork, maps, relics, and lore context' },
   ];
@@ -72,6 +89,58 @@ export const WorldbuildingView = () => {
     fetchSectionData();
   }, [activeStory, activeSection]);
 
+  const fetchLibrary = async () => {
+    if (!activeStory) return;
+    try {
+      const res = await fetch(`/api/stories/${activeStory.id}/images/library`);
+      if (res.ok) setLibrary(await res.json());
+    } catch (err) {
+      console.error('Failed to fetch image library:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSection === 'gallery') fetchLibrary();
+  }, [activeStory, activeSection]);
+
+  // Filter the image library by title, context, category, tags, source, or character name
+  const filteredLibrary = (() => {
+    const q = gallerySearch.trim().toLowerCase();
+    if (!q) return library;
+    return library.filter((img) => {
+      const haystack = [
+        img.title,
+        img.context,
+        img.category,
+        img.source,
+        img.character_name,
+        ...(img.tags || []),
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  })();
+
+  useEffect(() => {
+    if (!activeStory) return;
+    const fetchCharacters = async () => {
+      try {
+        const res = await fetch(`/api/stories/${activeStory.id}/characters`);
+        if (res.ok) {
+          setCharacters(await res.json());
+        }
+      } catch (err) {
+        console.error('Failed to fetch characters:', err);
+      }
+    };
+    fetchCharacters();
+  }, [activeStory, activeSection]);
+
+  // Resolve belongs_to character ids to their names/objects
+  const charName = (id) => characters.find((c) => c.id === id)?.name || id;
+
   const saveSectionData = async (newPayload) => {
     if (!activeStory) return;
     try {
@@ -85,11 +154,65 @@ export const WorldbuildingView = () => {
         const saved = await res.json();
         setData(saved);
         setShowItemModal(false);
+        if (activeSection === 'gallery') fetchLibrary();
       }
     } catch (err) {
       console.error('Failed to save world section:', err);
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Sync which characters own an artifact by updating each character's artifact_ids
+  const syncArtifactCharacters = async (artifact) => {
+    const selected = artifact.belongs_to || [];
+    const affected = characters.filter((c) => {
+      const has = (c.artifact_ids || []).includes(artifact.id);
+      const want = selected.includes(c.id);
+      return has !== want;
+    });
+
+    let updatedLocal = [ ...characters ];
+    for (const char of affected) {
+      const want = selected.includes(char.id);
+      const artifactIds = want
+        ? [...new Set([...(char.artifact_ids || []), artifact.id])]
+        : (char.artifact_ids || []).filter((id) => id !== artifact.id);
+      const updatedChar = { ...char, artifact_ids: artifactIds };
+      updatedLocal = updatedLocal.map((c) => (c.id === updatedChar.id ? updatedChar : c));
+      try {
+        await fetch(`/api/stories/${activeStory.id}/characters`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedChar),
+        });
+      } catch (err) {
+        console.error('Failed to sync character artifact link:', err);
+      }
+    }
+    setCharacters(updatedLocal);
+  };
+
+  // Persist an artifact (create or edit) into the story artifact section, then sync owners
+  const handleSaveArtifact = async (artifact) => {
+    if (!activeStory) return;
+    const current = Array.isArray(data) ? data : [];
+    const updated = [...current.filter((a) => a.id !== artifact.id), artifact];
+    try {
+      const res = await fetch(`/api/stories/${activeStory.id}/world/artifacts`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated),
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setData(saved);
+        await syncArtifactCharacters(artifact);
+        setShowArtifactModal(false);
+        setEditingArtifact(null);
+      }
+    } catch (err) {
+      console.error('Failed to save artifact:', err);
     }
   };
 
@@ -168,12 +291,14 @@ export const WorldbuildingView = () => {
   const handleSaveGallery = (e) => {
     e.preventDefault();
     if (!galleryForm.title.trim() || !galleryForm.image_url.trim()) return;
+    const tags = (galleryForm.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
     const newItem = {
       id: galleryForm.id || galleryForm.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
       title: galleryForm.title,
       image_url: galleryForm.image_url,
       context: galleryForm.context,
       category: galleryForm.category || 'Concept Art',
+      tags,
     };
     const current = Array.isArray(data) ? data : [];
     const updated = [...current.filter((item) => item.id !== newItem.id), newItem];
@@ -228,10 +353,15 @@ export const WorldbuildingView = () => {
         {activeSection !== 'mechanics' && (
           <button
             onClick={() => {
+              if (activeSection === 'artifacts') {
+                setEditingArtifact(null);
+                setShowArtifactModal(true);
+                return;
+              }
               setCityForm({ id: '', name: '', region: '', atmosphere: '', key_locations: '' });
               setFactionForm({ id: '', name: '', description: '', leader: '', alignment: '' });
               setGlossaryForm({ id: '', term: '', definition: '', category: 'General' });
-              setGalleryForm({ id: '', title: '', image_url: '', context: '', category: 'Concept Art' });
+              setGalleryForm({ id: '', title: '', image_url: '', context: '', category: 'Concept Art', tags: '' });
               setImageSourceMode('upload');
               setShowItemModal(true);
             }}
@@ -435,7 +565,143 @@ export const WorldbuildingView = () => {
           </div>
         )}
 
-        {/* 4. LEXICON & GLOSSARY TAB */}
+        {/* 4. ARTIFACTS & RELICS TAB */}
+        {activeSection === 'artifacts' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {Array.isArray(data) && data.length > 0 ? (
+              data.map((art) => (
+                <div key={art.id} className="literary-card rounded-2xl overflow-hidden flex flex-col group">
+                  {/* Artifact Image */}
+                  <div className="h-44 w-full relative overflow-hidden bg-[var(--bg-base)] border-b border-[var(--border-subtle)]">
+                    {art.image_url ? (
+                      <img
+                        src={art.image_url}
+                        alt={art.name}
+                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      />
+                    ) : (
+                      <div className="h-full w-full flex items-center justify-center font-prose font-bold text-6xl text-[var(--accent)]/25 bg-gradient-to-br from-[var(--accent-light)] to-[var(--bg-base)]">
+                        {(art.name || 'A').charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    {art.type && (
+                      <span className="absolute top-3 left-3 rounded-lg bg-black/60 backdrop-blur-xs px-2.5 py-1 text-[10px] font-bold text-white uppercase tracking-wider">
+                        {art.type}
+                      </span>
+                    )}
+                    <div className="absolute top-3 right-3 flex items-center gap-1.5">
+                      <button
+                        onClick={() => {
+                          setEditingArtifact(art);
+                          setShowArtifactModal(true);
+                        }}
+                        className="p-1.5 rounded-lg bg-black/60 text-white hover:bg-[var(--accent)] transition-colors"
+                        title="Edit Artifact"
+                      >
+                        <Edit3 className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteItem(art.id)}
+                        className="p-1.5 rounded-lg bg-black/60 text-white hover:bg-red-600 transition-colors"
+                        title="Delete Artifact"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Artifact Details */}
+                  <div className="p-5 flex-1 space-y-3">
+                    <div className="flex items-start justify-between">
+                      <h3 className="font-prose text-lg font-bold text-[var(--text-main)]">
+                        {art.name}
+                      </h3>
+                    </div>
+
+                    {art.properties && (
+                      <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+                        {art.properties}
+                      </p>
+                    )}
+
+                    {art.location && (
+                      <div className="text-xs text-[var(--text-dim)]">
+                        Location: <span className="font-semibold text-[var(--text-main)]">{art.location}</span>
+                      </div>
+                    )}
+
+                    {/* Belongs To */}
+                    {(art.belongs_to || []).length > 0 && (
+                      <div className="border-t border-[var(--border-subtle)] pt-2 space-y-1.5">
+                        <div className="text-[10px] font-bold uppercase text-[var(--text-dim)] flex items-center gap-1">
+                          <Users className="h-3 w-3" />
+                          Belongs To ({art.belongs_to.length})
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {art.belongs_to.map((charId) => (
+                            <span
+                              key={charId}
+                              className="rounded-md bg-[var(--bg-base)] px-2 py-0.5 text-[10px] font-semibold text-[var(--text-main)] border border-[var(--border-subtle)]"
+                            >
+                              {charName(charId)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Timeline of Books */}
+                    {art.timeline && art.timeline.length > 0 && (
+                      <div className="border-t border-[var(--border-subtle)] pt-2 space-y-2">
+                        <div className="text-[10px] font-bold uppercase text-[var(--text-dim)] flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          Timeline in Books ({art.timeline.length})
+                        </div>
+                        <div className="space-y-2">
+                          {art.timeline.map((evt, idx) => (
+                            <div key={idx} className="rounded-lg bg-[var(--bg-base)] border border-[var(--border-subtle)] p-2.5 space-y-1">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-bold text-[var(--accent)] uppercase tracking-wider font-mono">
+                                  {evt.year_or_era || 'Unknown Era'}
+                                </span>
+                                {evt.book_ids && evt.book_ids.length > 0 && (
+                                  <div className="flex gap-1">
+                                    {evt.book_ids.map((b) => (
+                                      <span
+                                        key={b}
+                                        className="rounded-md bg-[var(--accent-light)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--accent)]"
+                                      >
+                                        Book {b}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="text-xs font-bold text-[var(--text-main)]">
+                                {evt.title}
+                              </div>
+                              {evt.description && (
+                                <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
+                                  {evt.description}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="col-span-full p-12 literary-card rounded-2xl text-center text-xs text-[var(--text-muted)]">
+                No artifacts or relics defined yet. Click 'Add New Entry' to create magic items and legendary gear.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 5. LEXICON & GLOSSARY TAB */}
         {activeSection === 'glossary' && (
           <div className="space-y-4">
             {Array.isArray(data) && data.length > 0 ? (
@@ -472,50 +738,112 @@ export const WorldbuildingView = () => {
           </div>
         )}
 
-        {/* 5. GALLERY & CONCEPT ART TAB */}
+{/* 6. GALLERY & CONCEPT ART TAB */}
         {activeSection === 'gallery' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {Array.isArray(data) && data.length > 0 ? (
-              data.map((art) => (
-                <div key={art.id} className="literary-card rounded-2xl overflow-hidden flex flex-col justify-between group">
-                  {/* Artwork Image Container */}
-                  <div className="h-48 w-full relative overflow-hidden bg-[var(--bg-base)] border-b border-[var(--border-subtle)]">
-                    <img
-                      src={art.image_url}
-                      alt={art.title}
-                      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-                    
-                    <span className="absolute top-3 left-3 rounded-lg bg-black/60 backdrop-blur-xs px-2.5 py-1 text-[10px] font-bold text-white uppercase tracking-wider">
-                      {art.category || 'Concept Art'}
-                    </span>
+          <div className="space-y-5">
+            {/* Search + Filter */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--text-dim)]" />
+                <input
+                  type="text"
+                  value={gallerySearch}
+                  onChange={(e) => setGallerySearch(e.target.value)}
+                  placeholder="Search concept art by title, tags, character, or category..."
+                  className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] pl-9 pr-8 py-2.5 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                />
+                {gallerySearch && (
+                  <button
+                    onClick={() => setGallerySearch('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-[var(--text-dim)] hover:text-[var(--text-main)] hover:bg-[var(--bg-hover)]"
+                    title="Clear search"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+              <div className="text-xs text-[var(--text-muted)] shrink-0">
+                {filteredLibrary.length} image{filteredLibrary.length === 1 ? '' : 's'}
+              </div>
+            </div>
 
-                    <button
-                      onClick={() => handleDeleteItem(art.id)}
-                      className="absolute top-3 right-3 p-1.5 rounded-lg bg-black/60 text-white hover:bg-red-600 transition-colors"
-                      title="Delete Artwork"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
+            {filteredLibrary.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredLibrary.map((art) => (
+                  <div key={`${art.source}-${art.id}`} className="literary-card rounded-2xl overflow-hidden flex flex-col justify-between group">
+                    {/* Artwork Image Container */}
+                    <div className="h-48 w-full relative overflow-hidden bg-[var(--bg-base)] border-b border-[var(--border-subtle)]">
+                      <img
+                        src={art.image_url}
+                        alt={art.title}
+                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
 
-                  {/* Lore Context & Details */}
-                  <div className="p-5 flex-1 space-y-2">
-                    <h3 className="font-prose text-lg font-bold text-[var(--text-main)]">
-                      {art.title}
-                    </h3>
-                    {art.context && (
-                      <p className="text-xs text-[var(--text-muted)] leading-relaxed font-prose">
-                        {art.context}
-                      </p>
-                    )}
+                      <span className="absolute top-3 left-3 rounded-lg bg-black/60 backdrop-blur-xs px-2.5 py-1 text-[10px] font-bold text-white uppercase tracking-wider">
+                        {art.category || 'Concept Art'}
+                      </span>
+
+                      {art.source === 'gallery' ? (
+                        <button
+                          onClick={() => handleDeleteItem(art.id)}
+                          className="absolute top-3 right-3 p-1.5 rounded-lg bg-black/60 text-white hover:bg-red-600 transition-colors"
+                          title="Delete Artwork"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      ) : (
+                        <span className="absolute top-3 right-3 rounded-lg bg-[var(--accent)]/80 px-2.5 py-1 text-[10px] font-bold text-white uppercase tracking-wider">
+                          {art.source === 'character' ? 'Character' : art.source}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Lore Context, Tags & Details */}
+                    <div className="p-5 flex-1 space-y-2">
+                      <div>
+                        <h3 className="font-prose text-lg font-bold text-[var(--text-main)]">
+                          {art.title}
+                        </h3>
+                        {art.character_name && (
+                          <span className="text-[10px] font-semibold text-[var(--accent)] font-mono">
+                            Character: {art.character_name}
+                          </span>
+                        )}
+                      </div>
+                      {art.context && (
+                        <p className="text-xs text-[var(--text-muted)] leading-relaxed font-prose">
+                          {art.context}
+                        </p>
+                      )}
+                      {(art.tags || []).length > 0 && (
+                        <div className="flex flex-wrap gap-1 pt-1 border-t border-[var(--border-subtle)]">
+                          {art.tags.map((tag) => (
+                            <button
+                              key={tag}
+                              onClick={() => setGallerySearch(gallerySearch === tag ? '' : tag)}
+                              className={`inline-flex items-center gap-1 rounded-md bg-[var(--bg-base)] px-2 py-0.5 text-[10px] font-semibold border transition-colors cursor-pointer ${
+                                gallerySearch === tag
+                                  ? 'border-[var(--accent)] text-[var(--accent)]'
+                                  : 'border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--accent)] hover:border-[var(--accent)]'
+                              }`}
+                              title={`Filter by #${tag}`}
+                            >
+                              <Tag className="h-2.5 w-2.5" />
+                              {tag}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))
+                ))}
+              </div>
             ) : (
-              <div className="col-span-full p-12 literary-card rounded-2xl text-center text-xs text-[var(--text-muted)]">
-                No artwork or concept art added yet. Click 'Add New Entry' to upload images and add lore context.
+              <div className="p-12 literary-card rounded-2xl text-center text-xs text-[var(--text-muted)]">
+                {gallerySearch
+                  ? `No images match "${gallerySearch}".`
+                  : 'No artwork, character images, or concept art yet. Click \'Add New Entry\' to upload images and add lore context.'}
               </div>
             )}
           </div>
@@ -769,6 +1097,19 @@ export const WorldbuildingView = () => {
                   </div>
                 </div>
 
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                    Tags (comma separated, searchable)
+                  </label>
+                  <input
+                    type="text"
+                    value={galleryForm.tags}
+                    onChange={(e) => setGalleryForm({ ...galleryForm, tags: e.target.value })}
+                    placeholder="map, northern reach, lore"
+                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                  />
+                </div>
+
                 {/* Image Source Mode Toggle */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -882,6 +1223,21 @@ export const WorldbuildingView = () => {
             )}
           </div>
         </div>
+      )}
+
+      {/* Artifact Create/Edit Modal */}
+      {showArtifactModal && (
+        <ArtifactFormModal
+          storyId={activeStory.id}
+          characters={characters}
+          initialArtifact={editingArtifact}
+          submitLabel={editingArtifact ? 'Save Changes' : 'Create Artifact'}
+          onClose={() => {
+            setShowArtifactModal(false);
+            setEditingArtifact(null);
+          }}
+          onSubmit={handleSaveArtifact}
+        />
       )}
     </div>
   );

@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from app.schemas import (
     Story, Character, CharacterAppearances, WorldMechanics, City, Faction, Artifact, GlossaryTerm,
-    Book, Chapter, Plot, CharacterArc
+    Book, Chapter, Plot, CharacterArc, StoryImageItem
 )
 from app.file_manager import FileManager
 
@@ -93,6 +93,14 @@ def get_story_asset(story_id: str, filename: str):
     return FileResponse(path)
 
 
+@app.delete("/api/stories/{story_id}/assets/{filename}")
+def delete_story_asset(story_id: str, filename: str):
+    success = file_manager.delete_asset(story_id, filename)
+    if not success:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return {"message": f"Asset '{filename}' deleted successfully"}
+
+
 # --- 2. Character Endpoints ---
 
 @app.get("/api/stories/{story_id}/characters", response_model=List[Character])
@@ -102,7 +110,9 @@ def list_characters(story_id: str):
 
 @app.post("/api/stories/{story_id}/characters", response_model=Character)
 def create_character(story_id: str, character: Character):
-    return file_manager.save_character(story_id, character)
+    saved = file_manager.save_character(story_id, character)
+    file_manager.sync_story_backgrounds(story_id)
+    return saved
 
 
 @app.get("/api/stories/{story_id}/characters/{char_id}", response_model=Character)
@@ -117,7 +127,9 @@ def get_character(story_id: str, char_id: str):
 def update_character(story_id: str, char_id: str, character: Character):
     if character.id != char_id:
         character.id = char_id
-    return file_manager.save_character(story_id, character)
+    saved = file_manager.save_character(story_id, character)
+    file_manager.sync_story_backgrounds(story_id)
+    return saved
 
 
 @app.delete("/api/stories/{story_id}/characters/{char_id}")
@@ -125,6 +137,7 @@ def delete_character(story_id: str, char_id: str):
     success = file_manager.delete_character(story_id, char_id)
     if not success:
         raise HTTPException(status_code=400, detail="Failed to delete character")
+    file_manager.sync_story_backgrounds(story_id)
     return {"message": "Character deleted successfully"}
 
 
@@ -142,7 +155,15 @@ def get_world_section(story_id: str, section: str):
 
 @app.put("/api/stories/{story_id}/world/{section}")
 def update_world_section(story_id: str, section: str, data: Any = Body(...)):
-    return file_manager.save_world_section(story_id, section, data)
+    saved = file_manager.save_world_section(story_id, section, data)
+    if section == "gallery":
+        file_manager.sync_story_backgrounds(story_id)
+    return saved
+
+
+@app.get("/api/stories/{story_id}/images/library", response_model=List[StoryImageItem])
+def get_story_image_library(story_id: str):
+    return file_manager.get_image_library(story_id)
 
 
 # --- 4. Book & Chapter Endpoints ---

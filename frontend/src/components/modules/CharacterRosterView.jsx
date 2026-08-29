@@ -16,9 +16,14 @@ import {
   Layers,
   Upload,
   Link as LinkIcon,
-  ImageIcon
+  ImageIcon,
+  Gem,
+  ChevronLeft,
+  ChevronRight,
+  StickyNote
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
+import { ArtifactFormModal } from '../ArtifactFormModal';
 
 export const CharacterRosterView = () => {
   const { activeStory } = useStory();
@@ -30,10 +35,12 @@ export const CharacterRosterView = () => {
   // Modals
   const [showCharModal, setShowCharModal] = useState(false);
   const [showEventModal, setShowEventModal] = useState(false);
+  const [showArtifactModal, setShowArtifactModal] = useState(false);
 
   // Image source mode: 'upload' | 'url'
   const [imageSourceMode, setImageSourceMode] = useState('upload');
   const [uploading, setUploading] = useState(false);
+  const [galleryUploading, setGalleryUploading] = useState(false);
 
   // Character Form
   const [charForm, setCharForm] = useState({
@@ -51,6 +58,29 @@ export const CharacterRosterView = () => {
     description: '',
     book_ids: '',
   });
+
+  // Artifact state
+  const [storyArtifacts, setStoryArtifacts] = useState([]);
+  const [attachArtifactId, setAttachArtifactId] = useState('');
+  const [defaultBelongsTo, setDefaultBelongsTo] = useState([]);
+
+  // Gallery lightbox
+  const [lightboxIndex, setLightboxIndex] = useState(null);
+
+  // Character notes (inline, no modal)
+  const [showNoteInput, setShowNoteInput] = useState(false);
+  const [noteDraft, setNoteDraft] = useState('');
+
+  // Active detail tab (Notes is the default view)
+  const [activeDetailTab, setActiveDetailTab] = useState('notes');
+
+  const detailTabs = [
+    { id: 'notes', label: 'Notes', icon: StickyNote },
+    { id: 'timeline', label: 'Timeline', icon: Clock },
+    { id: 'gallery', label: 'Gallery', icon: ImageIcon },
+    { id: 'artifacts', label: 'Artifacts', icon: Gem },
+    { id: 'appearances', label: 'Appearances', icon: Layers },
+  ];
 
   const fetchCharacters = async () => {
     if (!activeStory) return;
@@ -84,15 +114,44 @@ export const CharacterRosterView = () => {
     }
   };
 
+  const fetchStoryArtifacts = async () => {
+    if (!activeStory) return;
+    try {
+      const res = await fetch(`/api/stories/${activeStory.id}/world/artifacts`);
+      if (res.ok) {
+        const json = await res.json();
+        if (Array.isArray(json)) {
+          setStoryArtifacts(json);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch story artifacts:', err);
+    }
+  };
+
   useEffect(() => {
     fetchCharacters();
+    fetchStoryArtifacts();
   }, [activeStory]);
 
   useEffect(() => {
     if (selectedChar) {
+      setActiveDetailTab('notes');
       fetchAppearances(selectedChar.id);
     }
+    fetchStoryArtifacts();
   }, [selectedChar, activeStory]);
+
+  // Close gallery lightbox with Escape
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') setLightboxIndex(null);
+    };
+    if (lightboxIndex !== null) {
+      window.addEventListener('keydown', onKey);
+      return () => window.removeEventListener('keydown', onKey);
+    }
+  }, [lightboxIndex]);
 
   // Handle local image file upload
   const handleFileUpload = async (e) => {
@@ -123,6 +182,155 @@ export const CharacterRosterView = () => {
     }
   };
 
+  // Save an updated character (gallery changes) to the backend and sync local state
+  const persistCharacter = async (updatedChar) => {
+    if (!activeStory) return null;
+    try {
+      const res = await fetch(`/api/stories/${activeStory.id}/characters`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedChar),
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setSelectedChar(saved);
+        setCharacters((prev) => prev.map((c) => (c.id === saved.id ? saved : c)));
+        return saved;
+      }
+    } catch (err) {
+      console.error('Failed to save character:', err);
+    }
+    return null;
+  };
+
+  // Upload an additional gallery image for the selected character
+  const handleGalleryUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeStory || !selectedChar) return;
+
+    try {
+      setGalleryUploading(true);
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch(`/api/stories/${activeStory.id}/assets/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const gallery = [...(selectedChar.gallery || []), data.url];
+        const updatedChar = {
+          ...selectedChar,
+          gallery,
+          image_url: selectedChar.image_url || data.url,
+        };
+        await persistCharacter(updatedChar);
+      } else {
+        alert(`Upload failed (${res.status}). Please try again.`);
+      }
+    } catch (err) {
+      console.error('Failed to upload gallery image:', err);
+      alert('Upload failed. Check that the backend server is running.');
+    } finally {
+      setGalleryUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleSetPrimaryImage = async (url) => {
+    if (!selectedChar) return;
+    await persistCharacter({ ...selectedChar, image_url: url });
+  };
+
+  const handleRemoveGalleryImage = async (url) => {
+    if (!selectedChar) return;
+    const gallery = (selectedChar.gallery || []).filter((u) => u !== url);
+    let image_url = selectedChar.image_url;
+    if (image_url === url) {
+      image_url = gallery[0] || '';
+    }
+    await persistCharacter({ ...selectedChar, gallery, image_url });
+  };
+
+  // Persist artifact (create/edit) into the story artifact section, then sync owners
+  const saveArtifactData = async (artifact) => {
+    if (!activeStory) return;
+    const updatedArtifacts = [...storyArtifacts.filter((a) => a.id !== artifact.id), artifact];
+    try {
+      const res = await fetch(`/api/stories/${activeStory.id}/world/artifacts`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedArtifacts),
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setStoryArtifacts(saved);
+        await syncArtifactCharacters(artifact);
+        setShowArtifactModal(false);
+      }
+    } catch (err) {
+      console.error('Failed to save artifact:', err);
+    }
+  };
+
+  // Sync which characters own an artifact by updating each character's artifact_ids
+  const syncArtifactCharacters = async (artifact) => {
+    const selected = artifact.belongs_to || [];
+    const affected = characters.filter((c) => {
+      const has = (c.artifact_ids || []).includes(artifact.id);
+      const want = selected.includes(c.id);
+      return has !== want;
+    });
+
+    let updatedLocal = [...characters];
+    for (const char of affected) {
+      const want = selected.includes(char.id);
+      const artifactIds = want
+        ? [...new Set([...(char.artifact_ids || []), artifact.id])]
+        : (char.artifact_ids || []).filter((id) => id !== artifact.id);
+      const updatedChar = { ...char, artifact_ids: artifactIds };
+      updatedLocal = updatedLocal.map((c) => (c.id === updatedChar.id ? updatedChar : c));
+      try {
+        const res = await fetch(`/api/stories/${activeStory.id}/characters`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedChar),
+        });
+        if (res.ok) {
+          const saved = await res.json();
+          updatedLocal = updatedLocal.map((c) => (c.id === saved.id ? saved : c));
+        }
+      } catch (err) {
+        console.error('Failed to sync character artifact link:', err);
+      }
+    }
+    setCharacters(updatedLocal);
+    setSelectedChar((prev) => updatedLocal.find((c) => c.id === prev?.id) || prev);
+  };
+
+  const handleAttachArtifact = async () => {
+    if (!selectedChar || !attachArtifactId) return;
+    const artifact = storyArtifacts.find((a) => a.id === attachArtifactId);
+    if (!artifact) return;
+    await saveArtifactData({
+      ...artifact,
+      belongs_to: [...new Set([...(artifact.belongs_to || []), selectedChar.id])],
+    });
+    setAttachArtifactId('');
+  };
+
+  const handleDetachArtifact = async (artifactId) => {
+    if (!selectedChar) return;
+    const artifact = storyArtifacts.find((a) => a.id === artifactId);
+    if (!artifact) return;
+    await saveArtifactData({
+      ...artifact,
+      belongs_to: (artifact.belongs_to || []).filter((id) => id !== selectedChar.id),
+    });
+  };
+
   const handleSaveCharacter = async (e) => {
     e.preventDefault();
     if (!activeStory || !charForm.name.trim()) return;
@@ -134,6 +342,9 @@ export const CharacterRosterView = () => {
       id: charId,
       timeline_events: selectedChar?.id === charId ? selectedChar.timeline_events : [],
       plot_point_ids: selectedChar?.id === charId ? selectedChar.plot_point_ids : [],
+      gallery: selectedChar?.id === charId ? selectedChar.gallery || [] : [],
+      notes: selectedChar?.id === charId ? selectedChar.notes || [] : [],
+      artifact_ids: selectedChar?.id === charId ? selectedChar.artifact_ids || [] : [],
     };
 
     try {
@@ -167,6 +378,25 @@ export const CharacterRosterView = () => {
     } catch (err) {
       console.error('Failed to delete character:', err);
     }
+  };
+
+  const handleAddNote = async () => {
+    if (!selectedChar || !noteDraft.trim()) return;
+    const notes = [...(selectedChar.notes || []), noteDraft.trim()];
+    const saved = await persistCharacter({ ...selectedChar, notes, bio: '' });
+    if (saved) {
+      setNoteDraft('');
+      setShowNoteInput(false);
+    }
+  };
+
+  const handleDeleteNote = async (idx) => {
+    if (!selectedChar) return;
+    const current = selectedChar.notes && selectedChar.notes.length > 0
+      ? selectedChar.notes
+      : selectedChar.bio ? [selectedChar.bio] : [];
+    const notes = current.filter((_, i) => i !== idx);
+    await persistCharacter({ ...selectedChar, notes, bio: '' });
   };
 
   const handleAddTimelineEvent = async (e) => {
@@ -211,6 +441,16 @@ export const CharacterRosterView = () => {
     );
   }
 
+  const galleryUrls = selectedChar?.gallery || [];
+
+  // Legacy fallback: characters created before "notes" show their old bio as the first note
+  const characterNotes =
+    selectedChar?.notes && selectedChar.notes.length > 0
+      ? selectedChar.notes
+      : selectedChar?.bio
+      ? [selectedChar.bio]
+      : [];
+
   return (
     <div className="space-y-8 animate-in fade-in">
       {/* Header Banner */}
@@ -241,66 +481,128 @@ export const CharacterRosterView = () => {
         </button>
       </div>
 
-      {/* Main Split Layout: Roster List vs Active Profile Details */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Column: Character Cards List (4 Cols) */}
-        <div className="lg:col-span-4 space-y-4">
+      {/* Full Roster Grid: shown only when no character is selected yet */}
+      {!selectedChar && (
+        <div className="space-y-4">
           <h3 className="font-prose text-lg font-bold text-[var(--text-main)] flex items-center justify-between">
             <span>Roster ({characters.length})</span>
           </h3>
 
-          <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
-            {characters.length === 0 && (
-              <div className="p-6 text-center literary-card rounded-xl text-xs text-[var(--text-muted)]">
-                No characters created yet. Click 'New Character Profile' to add your cast.
-              </div>
-            )}
+          {characters.length === 0 && (
+            <div className="p-6 text-center literary-card rounded-xl text-xs text-[var(--text-muted)]">
+              No characters created yet. Click 'New Character Profile' to add your cast.
+            </div>
+          )}
 
+          {characters.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {characters.map((char) => {
+                return (
+                  <div
+                    key={char.id}
+                    onClick={() => setSelectedChar(char)}
+                    className="literary-card rounded-2xl cursor-pointer transition-all hover:border-[var(--accent)] hover:shadow-md overflow-hidden"
+                  >
+                    <div className="h-44 w-full relative overflow-hidden bg-[var(--bg-base)]">
+                      {char.image_url ? (
+                        <img src={char.image_url} alt={char.name} className="h-full w-full object-cover transition-transform duration-500 hover:scale-105" />
+                      ) : (
+                        <div className="h-full w-full flex items-center justify-center font-prose font-bold text-5xl text-[var(--accent)]/30 bg-gradient-to-br from-[var(--accent-light)] to-[var(--bg-base)]">
+                          {char.name.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                      <div className="absolute bottom-0 left-0 right-0 p-3">
+                        <div className="font-prose text-base font-bold text-white drop-shadow-md truncate">
+                          {char.name}
+                        </div>
+                        <span className="inline-block rounded-md bg-black/40 backdrop-blur-sm px-2 py-0.5 text-[10px] font-semibold text-white/90 mt-0.5">
+                          {char.role || 'Main Roster'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Circle-Thumbnail Cast Strip: shown once a character is selected */}
+      {selectedChar && (
+        <div className="literary-card rounded-2xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+              <Users className="h-3.5 w-3.5 text-[var(--accent)]" />
+              <span>Cast Roster ({characters.length})</span>
+            </span>
+          </div>
+          <div className="flex items-end gap-4 overflow-x-auto pb-1">
             {characters.map((char) => {
               const isSelected = selectedChar?.id === char.id;
               return (
-                <div
+                <button
                   key={char.id}
                   onClick={() => setSelectedChar(char)}
-                  className={`literary-card rounded-2xl cursor-pointer transition-all overflow-hidden ${
-                    isSelected
-                      ? 'border-2 border-[var(--accent)] shadow-lg ring-2 ring-[var(--accent)]/20'
-                      : 'hover:border-[var(--accent)] hover:shadow-md'
-                  }`}
+                  className="group flex shrink-0 flex-col items-center gap-1.5 cursor-pointer"
+                  title={char.name}
                 >
-                  {/* Large Character Portrait */}
-                  <div className="h-44 w-full relative overflow-hidden bg-[var(--bg-base)]">
+                  <div
+                    className={`relative h-14 w-14 rounded-full overflow-hidden border-2 transition-all ${
+                      isSelected
+                        ? 'border-[var(--accent)] ring-2 ring-[var(--accent)]/30 shadow-lg'
+                        : 'border-[var(--border-color)] hover:border-[var(--accent)] hover:shadow-md'
+                    }`}
+                  >
                     {char.image_url ? (
-                      <img src={char.image_url} alt={char.name} className="h-full w-full object-cover transition-transform duration-500 hover:scale-105" />
+                      <img src={char.image_url} alt={char.name} className="h-full w-full object-cover" />
                     ) : (
-                      <div className="h-full w-full flex items-center justify-center font-prose font-bold text-5xl text-[var(--accent)]/30 bg-gradient-to-br from-[var(--accent-light)] to-[var(--bg-base)]">
+                      <div className="h-full w-full flex items-center justify-center font-prose font-bold text-lg text-[var(--accent)]/40 bg-gradient-to-br from-[var(--accent-light)] to-[var(--bg-base)]">
                         {char.name.charAt(0).toUpperCase()}
                       </div>
                     )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-                    <div className="absolute bottom-0 left-0 right-0 p-3">
-                      <div className="font-prose text-base font-bold text-white drop-shadow-md truncate">
-                        {char.name}
-                      </div>
-                      <span className="inline-block rounded-md bg-black/40 backdrop-blur-sm px-2 py-0.5 text-[10px] font-semibold text-white/90 mt-0.5">
-                        {char.role || 'Main Roster'}
-                      </span>
-                    </div>
                   </div>
-                </div>
+                  <span
+                    className={`max-w-[5.5rem] truncate text-center text-[10px] font-semibold transition-colors ${
+                      isSelected
+                        ? 'text-[var(--accent)]'
+                        : 'text-[var(--text-muted)] group-hover:text-[var(--accent)]'
+                    }`}
+                  >
+                    {char.name}
+                  </span>
+                </button>
               );
             })}
+            <button
+              onClick={() => {
+                setCharForm({ id: '', name: '', role: 'Protagonist', image_url: '', bio: '' });
+                setImageSourceMode('upload');
+                setShowCharModal(true);
+              }}
+              className="group flex shrink-0 flex-col items-center gap-1.5 cursor-pointer"
+              title="New Character Profile"
+            >
+              <div className="h-14 w-14 rounded-full border-2 border-dashed border-[var(--border-color)] bg-[var(--bg-base)] flex items-center justify-center text-[var(--text-dim)] group-hover:border-[var(--accent)] group-hover:text-[var(--accent)] transition-all">
+                <Plus className="h-5 w-5" />
+              </div>
+              <span className="max-w-[5.5rem] truncate text-center text-[10px] font-semibold text-[var(--text-dim)]">
+                Add New
+              </span>
+            </button>
           </div>
         </div>
+      )}
 
-        {/* Right Column: Active Character Detail & Matrix (8 Cols) */}
-        <div className="lg:col-span-8 space-y-6">
+        {/* Active Character Detail & Matrix (full width once selected) */}
+        <div className="space-y-6">
           {selectedChar ? (
             <>
               {/* Profile Card Header with Large Hero Portrait */}
               <div className="literary-card rounded-2xl overflow-hidden">
                 {/* Hero Portrait */}
-                <div className="relative h-72 w-full overflow-hidden bg-[var(--bg-base)]">
+                <div className="relative h-[28rem] w-full overflow-hidden bg-[var(--bg-base)]">
                   {selectedChar.image_url ? (
                     <img
                       src={selectedChar.image_url}
@@ -344,7 +646,7 @@ export const CharacterRosterView = () => {
                 </div>
 
                 {/* Name & Role Bar */}
-                <div className="p-6 space-y-3">
+                <div className="p-6">
                   <div className="flex items-center justify-between">
                     <div>
                       <h2 className="font-prose text-2xl font-bold text-[var(--text-main)]">
@@ -356,16 +658,397 @@ export const CharacterRosterView = () => {
                       </span>
                     </div>
                   </div>
-
-                  {selectedChar.bio && (
-                    <p className="text-sm text-[var(--text-muted)] leading-relaxed font-prose border-t border-[var(--border-subtle)] pt-3">
-                      {selectedChar.bio}
-                    </p>
-                  )}
                 </div>
               </div>
 
-              {/* Appearances Matrix Section */}
+{/* Tabbed Sub-Sections: column icon tab bar + active tab content */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* Column tab bar */}
+                <div className="lg:col-span-3 xl:col-span-2">
+                  <div className="literary-card rounded-2xl p-2 flex gap-1 md:flex-col overflow-x-auto lg:sticky lg:top-6">
+                    {detailTabs.map((tab) => {
+                      const active = activeDetailTab === tab.id;
+                      const TabIcon = tab.icon;
+                      return (
+                        <button
+                          key={tab.id}
+                          onClick={() => setActiveDetailTab(tab.id)}
+                          className={`flex shrink-0 items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-semibold transition-all cursor-pointer md:w-full ${
+                            active
+                              ? 'bg-[var(--accent)] text-white shadow-md'
+                              : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]'
+                          }`}
+                          title={tab.label}
+                        >
+                          <TabIcon className="h-4 w-4 shrink-0" />
+                          <span>{tab.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Active tab content */}
+                <div className="lg:col-span-9 xl:col-span-10 space-y-6">
+                  {activeDetailTab === 'notes' && (
+                    <div className="literary-card rounded-2xl p-6 space-y-3">
+                      <div className="flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] pb-3">
+                        <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                          <StickyNote className="h-3.5 w-3.5 text-[var(--accent)]" />
+                          Notes ({characterNotes.length})
+                        </span>
+                        {!showNoteInput && (
+                          <button
+                            onClick={() => setShowNoteInput(true)}
+                            className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-[var(--accent-hover)] transition-all"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            Add Note
+                          </button>
+                        )}
+                      </div>
+
+                      {showNoteInput && (
+                        <div className="space-y-2 rounded-xl border border-[var(--accent)]/40 bg-[var(--accent-light)]/40 p-3 animate-in fade-in zoom-in-95">
+                          <textarea
+                            value={noteDraft}
+                            onChange={(e) => setNoteDraft(e.target.value)}
+                            placeholder="Write a note about this character (traits, backstory, quirks...)..."
+                            rows={3}
+                            autoFocus
+                            className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden resize-y"
+                          />
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNoteDraft('');
+                                setShowNoteInput(false);
+                              }}
+                              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleAddNote}
+                              disabled={!noteDraft.trim()}
+                              className="flex items-center gap-1 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-[var(--accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                              Save Note
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {characterNotes.length === 0 && (
+                        <p className="text-xs italic text-[var(--text-dim)]">
+                          No notes yet. Click 'Add Note' to capture a brief description, key traits, or backstory details.
+                        </p>
+                      )}
+
+                      {characterNotes.map((note, idx) => (
+                        <div key={idx} className="group flex items-start gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3">
+                          <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[var(--accent)]/10 text-[10px] font-bold text-[var(--accent)]">
+                            {idx + 1}
+                          </span>
+                          <p className="flex-1 whitespace-pre-wrap text-sm text-[var(--text-muted)] leading-relaxed font-prose">
+                            {note}
+                          </p>
+                          <button
+                            onClick={() => handleDeleteNote(idx)}
+                            className="mt-0.5 rounded-md p-1 text-[var(--text-dim)] opacity-0 group-hover:opacity-100 hover:bg-red-500/10 hover:text-red-500 transition-all"
+                            title="Delete note"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {activeDetailTab === 'gallery' && (
+                    <div className="literary-card rounded-2xl p-6 space-y-4">
+                      <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
+                        <div className="flex items-center gap-2 font-semibold text-[var(--text-main)]">
+                          <ImageIcon className="h-5 w-5 text-[var(--accent)]" />
+                          <span>Character Gallery ({selectedChar.gallery?.length || 0})</span>
+                        </div>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleGalleryUpload}
+                          className="hidden"
+                          id="character-gallery-file-input"
+                        />
+                        <label
+                          htmlFor="character-gallery-file-input"
+                          className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-[var(--accent-hover)] transition-all cursor-pointer"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          <span>{galleryUploading ? 'Uploading...' : 'Add Image'}</span>
+                        </label>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                        {selectedChar.gallery && selectedChar.gallery.length > 0 ? (
+                          selectedChar.gallery.map((url, idx) => {
+                            const isPrimary = url === selectedChar.image_url;
+                            return (
+                              <div
+                                key={`${url}-${idx}`}
+                                onClick={() => setLightboxIndex(idx)}
+                                className="group relative aspect-[4/3] rounded-xl overflow-hidden border border-[var(--border-subtle)] bg-[var(--bg-base)] cursor-zoom-in"
+                              >
+                                <img
+                                  src={url}
+                                  alt={`${selectedChar.name} gallery ${idx + 1}`}
+                                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                />
+                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors" />
+                                {isPrimary && (
+                                  <span className="absolute top-1.5 left-1.5 rounded-md bg-[var(--accent)] px-1.5 py-0.5 text-[9px] font-bold text-white shadow-xs">
+                                    PRIMARY
+                                  </span>
+                                )}
+                                <div className="absolute inset-0 flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  {!isPrimary && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleSetPrimaryImage(url);
+                                      }}
+                                      className="rounded-lg bg-white/90 p-1.5 text-[var(--accent)] hover:bg-white"
+                                      title="Set as primary portrait"
+                                    >
+                                      <Check className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleRemoveGalleryImage(url);
+                                    }}
+                                    className="rounded-lg bg-white/90 p-1.5 text-red-600 hover:bg-white"
+                                    title="Remove image"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="col-span-full p-4 text-center text-xs italic text-[var(--text-dim)] border-2 border-dashed border-[var(--border-color)] rounded-xl">
+                            No additional images yet. Click 'Add Image' to upload more portraits of this character.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+              {/* Gallery Lightbox */}
+              {lightboxIndex !== null && (
+                <div
+                  className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-xs p-4 animate-in fade-in"
+                  onClick={() => setLightboxIndex(null)}
+                >
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setLightboxIndex((prev) => (prev + galleryUrls.length - 1) % galleryUrls.length);
+                    }}
+                    className="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white hover:bg-[var(--accent)] transition-colors"
+                    title="Previous image"
+                  >
+                    <ChevronLeft className="h-6 w-6" />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setLightboxIndex((prev) => (prev + 1) % galleryUrls.length);
+                    }}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white hover:bg-[var(--accent)] transition-colors"
+                    title="Next image"
+                  >
+                    <ChevronRight className="h-6 w-6" />
+                  </button>
+                  <img
+                    src={galleryUrls[lightboxIndex]}
+                    alt={`${selectedChar.name} gallery ${lightboxIndex + 1}`}
+                    className="max-h-[85vh] max-w-[90vw] object-contain rounded-xl shadow-2xl border border-white/10"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-white/80 text-xs font-semibold bg-black/50 px-3 py-1.5 rounded-full">
+                    {lightboxIndex + 1} / {galleryUrls.length}
+                  </div>
+                  <button
+                    onClick={() => setLightboxIndex(null)}
+                    className="absolute top-4 right-4 p-2 rounded-full bg-black/50 text-white hover:bg-red-600 transition-colors"
+                    title="Close (Esc)"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              )}
+
+              {activeDetailTab === 'artifacts' && (() => {
+                const charIds = selectedChar.artifact_ids || [];
+                const attachedArtifacts = storyArtifacts.filter(
+                  (a) =>
+                    (a.belongs_to || []).includes(selectedChar.id) ||
+                    charIds.includes(a.id)
+                );
+                const availableArtifacts = storyArtifacts.filter(
+                  (a) => !attachedArtifacts.some((x) => x.id === a.id)
+                );
+                const charName = (id) => characters.find((c) => c.id === id)?.name || id;
+
+                return (
+                  <div className="literary-card rounded-2xl p-6 space-y-4">
+                    <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
+                      <div className="flex items-center gap-2 font-semibold text-[var(--text-main)]">
+                        <Gem className="h-5 w-5 text-[var(--accent)]" />
+                        <span>Artifacts & Possessions ({attachedArtifacts.length})</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setDefaultBelongsTo([selectedChar.id]);
+                          setShowArtifactModal(true);
+                        }}
+                        className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-[var(--accent-hover)] transition-all cursor-pointer"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>Create Artifact</span>
+                      </button>
+                    </div>
+
+                    {/* Attach existing artifact */}
+                    {availableArtifacts.length > 0 && (
+                      <div className="flex items-center gap-2 p-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-base)]">
+                        <select
+                          value={attachArtifactId}
+                          onChange={(e) => setAttachArtifactId(e.target.value)}
+                          className="flex-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                        >
+                          <option value="">Attach an existing story artifact...</option>
+                          {availableArtifacts.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.name}{a.type ? ` (${a.type})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={handleAttachArtifact}
+                          disabled={!attachArtifactId}
+                          className="flex items-center gap-1 rounded-lg bg-[var(--accent-light)] px-3 py-2 text-xs font-semibold text-[var(--accent)] border border-[var(--border-subtle)] hover:bg-[var(--accent)] hover:text-white transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          <LinkIcon className="h-3.5 w-3.5" />
+                          <span>Attach</span>
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {attachedArtifacts.length > 0 ? (
+                        attachedArtifacts.map((a) => (
+                          <div
+                            key={a.id}
+                            className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)] overflow-hidden"
+                          >
+                            <div className="flex">
+                              <div className="h-28 w-28 shrink-0 bg-[var(--bg-card)] relative">
+                                {a.image_url ? (
+                                  <img src={a.image_url} alt={a.name} className="h-full w-full object-cover" />
+                                ) : (
+                                  <div className="h-full w-full flex items-center justify-center font-prose font-bold text-3xl text-[var(--accent)]/25">
+                                    {(a.name || 'A').charAt(0).toUpperCase()}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex-1 p-3 space-y-1.5 min-w-0">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <h4 className="font-prose text-sm font-bold text-[var(--text-main)] truncate">
+                                      {a.name}
+                                    </h4>
+                                    {a.type && (
+                                      <span className="inline-block rounded-md bg-[var(--accent-light)] px-2 py-0.5 text-[10px] font-bold text-[var(--accent)] border border-[var(--border-subtle)] mt-0.5">
+                                        {a.type}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <button
+                                    onClick={() => handleDetachArtifact(a.id)}
+                                    className="p-1.5 rounded-lg text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500 transition-colors shrink-0"
+                                    title="Unlink from character"
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                                {a.properties && (
+                                  <p className="text-xs text-[var(--text-muted)] leading-relaxed line-clamp-2">
+                                    {a.properties}
+                                  </p>
+                                )}
+                                <div className="flex flex-wrap gap-1">
+                                  {(a.belongs_to || []).map((bid) => (
+                                    <span
+                                      key={bid}
+                                      className={`rounded-md px-1.5 py-0.5 text-[9px] font-semibold border ${
+                                        bid === selectedChar.id
+                                          ? 'bg-[var(--accent)] text-white border-transparent'
+                                          : 'bg-[var(--bg-card)] text-[var(--text-muted)] border-[var(--border-subtle)]'
+                                      }`}
+                                    >
+                                      {bid === selectedChar.id ? 'You' : charName(bid)}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+
+                            {a.timeline && a.timeline.length > 0 && (
+                              <div className="px-3 pb-3 space-y-1.5">
+                                <div className="text-[9px] font-bold uppercase text-[var(--text-dim)]">
+                                  Timeline in Books
+                                </div>
+                                {a.timeline.map((evt, ei) => (
+                                  <div
+                                    key={ei}
+                                    className="rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] px-2.5 py-1.5 space-y-0.5"
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[9px] font-bold text-[var(--accent)] uppercase tracking-wider font-mono">
+                                        {evt.year_or_era || 'Unknown Era'}
+                                      </span>
+                                      {evt.book_ids && evt.book_ids.length > 0 && (
+                                        <span className="text-[9px] font-semibold text-[var(--text-muted)]">
+                                          Books: {evt.book_ids.join(', ')}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-[11px] font-bold text-[var(--text-main)]">
+                                      {evt.title}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="col-span-full p-4 text-center text-xs italic text-[var(--text-dim)] border-2 border-dashed border-[var(--border-color)] rounded-xl">
+                          No artifacts attached yet. Create a new artifact or attach an existing story artifact.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {activeDetailTab === 'appearances' && (
               <div className="literary-card rounded-2xl p-6 space-y-4">
                 <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
                   <div className="flex items-center gap-2 font-semibold text-[var(--text-main)]">
@@ -448,9 +1131,10 @@ export const CharacterRosterView = () => {
                     </div>
                   </div>
                 </div>
-              </div>
+                </div>
+              )}
 
-              {/* Interactive Vertical Timeline Component */}
+              {activeDetailTab === 'timeline' && (
               <div className="literary-card rounded-2xl p-6 space-y-6">
                 <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
                   <div className="flex items-center gap-2 font-semibold text-[var(--text-main)]">
@@ -507,14 +1191,16 @@ export const CharacterRosterView = () => {
                   )}
                 </div>
               </div>
+              )}
+                </div>
+              </div>
             </>
           ) : (
             <div className="literary-card rounded-2xl p-12 text-center text-xs text-[var(--text-muted)]">
-              Select a character from the roster on the left or create a new profile.
+              Select a character from the roster above or create a new profile.
             </div>
           )}
         </div>
-      </div>
 
       {/* Character Create/Edit Modal with Local Upload or External URL */}
       {showCharModal && (
@@ -755,6 +1441,19 @@ export const CharacterRosterView = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Create Artifact Modal */}
+      {showArtifactModal && (
+        <ArtifactFormModal
+          storyId={activeStory.id}
+          characters={characters}
+          initialArtifact={null}
+          defaultBelongsTo={defaultBelongsTo}
+          submitLabel="Create Artifact"
+          onClose={() => setShowArtifactModal(false)}
+          onSubmit={saveArtifactData}
+        />
       )}
     </div>
   );

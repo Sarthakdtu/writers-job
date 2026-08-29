@@ -96,7 +96,7 @@ class FileManager:
 
         for entry in self.base_data_dir.iterdir():
             if entry.is_dir():
-                story = self.get_story(entry.name)
+                story = self.sync_story_backgrounds(entry.name) or self.get_story(entry.name)
                 if story:
                     stories.append(story)
         return stories
@@ -132,6 +132,12 @@ class FileManager:
 
     def get_asset_path(self, story_slug: str, filename: str) -> Path:
         return self.get_story_dir(story_slug) / "assets" / filename
+
+    def delete_asset(self, story_slug: str, filename: str) -> bool:
+        path = self.get_asset_path(story_slug, filename)
+        if not path.exists():
+            return False
+        return delete_file_safe(path)
 
     # --- Character Operations ---
 
@@ -229,6 +235,97 @@ class FileManager:
     def delete_character(self, story_slug: str, char_id: str) -> bool:
         char_path = self.get_character_path(story_slug, char_id)
         return delete_file_safe(char_path)
+
+    def sync_story_backgrounds(self, story_slug: str) -> Optional[Story]:
+        """
+        Recomputes the story's background_images from the story's concept art
+        (world/gallery.json) and each character's gallery images, merged with
+        whatever was already there (except character portraits, which stay out).
+        Called after character or concept-art saves, and when listing stories.
+        """
+        story = self.get_story(story_slug)
+        if not story:
+            return None
+
+        characters = self.list_characters(story_slug)
+        portrait_urls = {char.image_url for char in characters if char.image_url}
+
+        background_images = [
+            url for url in (story.background_images or []) if url not in portrait_urls
+        ]
+
+        for char in characters:
+            for url in char.gallery or []:
+                if url and url not in background_images:
+                    background_images.append(url)
+
+        gallery = self.get_world_section(story_slug, "gallery")
+        if isinstance(gallery, list):
+            for item in gallery:
+                url = item.get("image_url") if isinstance(item, dict) else ""
+                if url and url not in background_images:
+                    background_images.append(url)
+
+        story.background_images = background_images
+        story.background_url = background_images[0] if background_images else story.background_url
+        return self.save_story(story)
+
+    def get_image_library(self, story_slug: str):
+        """
+        Returns a unified, tagged image library combining gallery / concept-art
+        items and character images, used by the searchable concept-art tab.
+        """
+        from app.schemas import StoryImageItem
+
+        library = []
+        gallery = self.get_world_section(story_slug, "gallery")
+        if isinstance(gallery, list):
+            for item in gallery:
+                if not item.get("image_url"):
+                    continue
+                category = item.get("category") or "Concept Art"
+                tags = list(item.get("tags") or [])
+                if category and category not in tags:
+                    tags.append(category)
+                library.append(StoryImageItem(
+                    source="gallery",
+                    id=item.get("id") or f"gallery-{len(library)}",
+                    title=item.get("title") or "Untitled Artwork",
+                    image_url=item["image_url"],
+                    context=item.get("context") or "",
+                    category=category,
+                    tags=tags,
+                ))
+
+        for char in self.list_characters(story_slug):
+            if char.image_url:
+                library.append(StoryImageItem(
+                    source="character",
+                    id=f"{char.id}-portrait",
+                    title=f"{char.name} — Portrait",
+                    image_url=char.image_url,
+                    context=char.bio or "",
+                    category="Characters",
+                    tags=[t for t in [char.name, "Characters", "Portrait"] if t],
+                    character_id=char.id,
+                    character_name=char.name,
+                ))
+            for idx, url in enumerate(char.gallery or []):
+                if not url:
+                    continue
+                library.append(StoryImageItem(
+                    source="character",
+                    id=f"{char.id}-gallery-{idx + 1}",
+                    title=f"{char.name} — Gallery {idx + 1}",
+                    image_url=url,
+                    context=char.bio or "",
+                    category="Characters",
+                    tags=[t for t in [char.name, "Characters", "Gallery"] if t],
+                    character_id=char.id,
+                    character_name=char.name,
+                ))
+
+        return library
 
     # --- World Operations ---
 

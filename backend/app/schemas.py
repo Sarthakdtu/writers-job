@@ -15,6 +15,9 @@ class Character(BaseModel):
     image_url: Optional[str] = ""
     role: Optional[str] = "Main Character"
     bio: Optional[str] = ""
+    notes: List[str] = Field(default_factory=list)
+    gallery: List[str] = Field(default_factory=list)
+    artifact_ids: List[str] = Field(default_factory=list)
     timeline_events: List[TimelineEvent] = Field(default_factory=list)
     plot_point_ids: List[str] = Field(default_factory=list)
 
@@ -47,6 +50,9 @@ class Artifact(BaseModel):
     type: str
     properties: str
     location: Optional[str] = ""
+    image_url: Optional[str] = ""
+    belongs_to: List[str] = Field(default_factory=list)
+    timeline: List[TimelineEvent] = Field(default_factory=list)
 
 
 class GlossaryTerm(BaseModel):
@@ -62,6 +68,19 @@ class GalleryItem(BaseModel):
     image_url: str
     context: str
     category: Optional[str] = "Concept Art"
+    tags: List[str] = Field(default_factory=list)
+
+
+class StoryImageItem(BaseModel):
+    source: str
+    id: str
+    title: str
+    image_url: str
+    context: str = ""
+    category: str = "Concept Art"
+    tags: List[str] = Field(default_factory=list)
+    character_id: Optional[str] = None
+    character_name: Optional[str] = None
 
 
 class PlotSubsection(BaseModel):
@@ -140,6 +159,7 @@ class Story(BaseModel):
     title: str
     tags: List[str] = Field(default_factory=list)
     background_url: Optional[str] = ""
+    background_images: List[str] = Field(default_factory=list)
     theme: Literal["sepia", "midnight", "paper"] = "sepia"
     aesthetic_theme: Optional[str] = "sepia"
     background_path: Optional[str] = ""

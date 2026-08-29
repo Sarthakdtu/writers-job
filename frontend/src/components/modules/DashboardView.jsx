@@ -1,23 +1,31 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Sparkles,
   Tag,
   Palette,
   Image as ImageIcon,
-  BookOpen,
+  RefreshCw,
+  Upload,
   Plus,
   Trash2,
-  Edit3,
   Check,
   X
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
 import { useTheme } from '../../context/ThemeContext';
 
+const getBgImages = (story) => {
+  if (story?.background_images && story.background_images.length > 0) return story.background_images;
+  if (story?.background_url) return [story.background_url];
+  if (story?.background_path) return [story.background_path];
+  return [];
+};
+
 export const DashboardView = () => {
   const {
     stories,
     activeStory,
+    updateStory,
     updateActiveStory,
     selectStory,
     createStory,
@@ -30,11 +38,45 @@ export const DashboardView = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newTags, setNewTags] = useState('');
-  
+
   // Per story edit states
   const [editingBgId, setEditingBgId] = useState(null);
-  const [bgUrlInput, setBgUrlInput] = useState('');
+  const [urlInputMap, setUrlInputMap] = useState({});
   const [tagInputMap, setTagInputMap] = useState({});
+
+  // Random background pick per story, re-rolled when a story's image set reloads
+  const [bgPicks, setBgPicks] = useState({});
+  const lastSigsRef = useRef({});
+
+  useEffect(() => {
+    setBgPicks((prev) => {
+      const picks = { ...prev };
+      const ids = new Set(stories.map((s) => s.id));
+      Object.keys(prev).forEach((id) => {
+        if (!ids.has(id)) delete picks[id];
+      });
+      stories.forEach((s) => {
+        const sig = `${(s.background_images || []).join('|')}|${s.background_url || ''}|${s.background_path || ''}`;
+        if (lastSigsRef.current[s.id] === sig) return;
+        lastSigsRef.current[s.id] = sig;
+        const images = getBgImages(s);
+        if (images.length > 0) picks[s.id] = images[Math.floor(Math.random() * images.length)];
+        else delete picks[s.id];
+      });
+      return picks;
+    });
+  }, [stories]);
+
+  const shuffleBg = (storyId) => {
+    const story = stories.find((s) => s.id === storyId);
+    const images = getBgImages(story);
+    if (images.length > 0) {
+      setBgPicks((prev) => ({
+        ...prev,
+        [storyId]: images[Math.floor(Math.random() * images.length)],
+      }));
+    }
+  };
 
   const filteredStories = stories.filter((s) => {
     if (selectedTag === 'All') return true;
@@ -53,26 +95,47 @@ export const DashboardView = () => {
       tags: tagList.length > 0 ? tagList : ['Fiction'],
       theme: 'sepia',
       background_url: '',
+      background_images: [],
     });
     setNewTitle('');
     setNewTags('');
     setShowCreateModal(false);
   };
 
-  const handleUpdateBg = async (storyId) => {
-    const target = stories.find((s) => s.id === storyId);
-    if (target) {
-      if (activeStory?.id === storyId) {
-        await updateActiveStory({ background_url: bgUrlInput });
-      } else {
-        await fetch(`/api/stories/${storyId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...target, background_url: bgUrlInput }),
-        });
-      }
-      setEditingBgId(null);
+  const uploadBackground = async (storyId, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`/api/stories/${storyId}/assets/upload`, {
+      method: 'POST',
+      body: form,
+    });
+    if (res.ok) {
+      const { url } = await res.json();
+      const target = stories.find((s) => s.id === storyId);
+      const images = [...(target.background_images || [])];
+      images.push(url);
+      await updateStory(storyId, { background_images: images, background_url: images[0] });
     }
+  };
+
+  const addBackgroundUrl = async (storyId) => {
+    const url = (urlInputMap[storyId] || '').trim();
+    if (!url) return;
+    const target = stories.find((s) => s.id === storyId);
+    const images = [...(target.background_images || [])];
+    images.push(url);
+    await updateStory(storyId, { background_images: images, background_url: images[0] });
+    setUrlInputMap((prev) => ({ ...prev, [storyId]: '' }));
+  };
+
+  const removeBackground = async (storyId, imgUrl) => {
+    const target = stories.find((s) => s.id === storyId);
+    const images = (target.background_images || []).filter((u) => u !== imgUrl);
+    if (imgUrl.startsWith(`/api/stories/${storyId}/assets/`)) {
+      const filename = imgUrl.split('/').pop();
+      await fetch(`/api/stories/${storyId}/assets/${filename}`, { method: 'DELETE' });
+    }
+    await updateStory(storyId, { background_images: images, background_url: images[0] || '' });
   };
 
   const handleAddTag = async (storyId) => {
@@ -81,15 +144,7 @@ export const DashboardView = () => {
     const target = stories.find((s) => s.id === storyId);
     if (target) {
       const updatedTags = [...new Set([...(target.tags || []), tagText.trim()])];
-      if (activeStory?.id === storyId) {
-        await updateActiveStory({ tags: updatedTags });
-      } else {
-        await fetch(`/api/stories/${storyId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...target, tags: updatedTags }),
-        });
-      }
+      await updateStory(storyId, { tags: updatedTags });
       setTagInputMap((prev) => ({ ...prev, [storyId]: '' }));
     }
   };
@@ -98,15 +153,7 @@ export const DashboardView = () => {
     const target = stories.find((s) => s.id === storyId);
     if (target) {
       const updatedTags = (target.tags || []).filter((t) => t !== tagToRemove);
-      if (activeStory?.id === storyId) {
-        await updateActiveStory({ tags: updatedTags });
-      } else {
-        await fetch(`/api/stories/${storyId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...target, tags: updatedTags }),
-        });
-      }
+      await updateStory(storyId, { tags: updatedTags });
     }
   };
 
@@ -188,7 +235,7 @@ export const DashboardView = () => {
               Your Fiction Projects ({filteredStories.length})
             </h2>
             <p className="text-xs text-[var(--text-muted)]">
-              Select a story to load its atmosphere and background artwork into context.
+              Each card shows a random background from its collection, shuffled on every refresh.
             </p>
           </div>
 
@@ -216,6 +263,8 @@ export const DashboardView = () => {
           {filteredStories.map((story) => {
             const isSelected = activeStory?.id === story.id;
             const isEditingBg = editingBgId === story.id;
+            const bgPreview = bgPicks[story.id] || '';
+            const bgImages = getBgImages(story);
 
             return (
               <div
@@ -228,7 +277,7 @@ export const DashboardView = () => {
                 <div
                   className="h-32 w-full relative bg-cover bg-center border-b border-[var(--border-subtle)] bg-[var(--bg-hover)]"
                   style={{
-                    backgroundImage: story.background_url ? `url(${story.background_url})` : 'none',
+                    backgroundImage: bgPreview ? `url(${bgPreview})` : 'none',
                   }}
                 >
                   <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-card)] via-transparent to-black/30" />
@@ -240,14 +289,24 @@ export const DashboardView = () => {
                     </span>
                   )}
 
-                  {/* Edit Background Image Button */}
+                  {/* Shuffle Background Button */}
+                  {bgImages.length > 1 && (
+                    <button
+                      onClick={() => shuffleBg(story.id)}
+                      className="absolute top-3 right-10 rounded-lg bg-black/60 backdrop-blur-xs p-1.5 text-white hover:bg-black/80 transition-colors"
+                      title="Shuffle background"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+
+                  {/* Manage Background Images Button */}
                   <button
                     onClick={() => {
-                      setBgUrlInput(story.background_url || '');
                       setEditingBgId(isEditingBg ? null : story.id);
                     }}
                     className="absolute top-3 right-3 rounded-lg bg-black/60 backdrop-blur-xs p-1.5 text-white hover:bg-black/80 transition-colors"
-                    title="Change Dynamic Background URL"
+                    title="Add / Remove Background Images"
                   >
                     <ImageIcon className="h-3.5 w-3.5" />
                   </button>
@@ -266,31 +325,74 @@ export const DashboardView = () => {
                       slug: {story.id}
                     </p>
 
-                    {/* Background Input form when toggled */}
+                    {/* Background Manager Panel */}
                     {isEditingBg && (
-                      <div className="mt-3 p-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-base)] space-y-2">
-                        <label className="block text-[10px] font-bold uppercase text-[var(--accent)]">
-                          Background Image URL
-                        </label>
-                        <input
-                          type="url"
-                          value={bgUrlInput}
-                          onChange={(e) => setBgUrlInput(e.target.value)}
-                          placeholder="https://..."
-                          className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] px-2.5 py-1 text-xs text-[var(--text-main)] focus:outline-hidden"
-                        />
-                        <div className="flex justify-end gap-1.5 pt-1">
+                      <div className="mt-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-base)] p-3 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[10px] font-bold uppercase text-[var(--accent)]">
+                            Background Images
+                          </label>
+                          <span className="text-[10px] text-[var(--text-dim)]">
+                            Shuffled on refresh
+                          </span>
+                        </div>
+
+                        {/* Thumbnails */}
+                        <div className="flex flex-wrap gap-2">
+                          {bgImages.length === 0 ? (
+                            <p className="text-[11px] text-[var(--text-muted)]">
+                              No backgrounds yet. Upload or paste a URL below.
+                            </p>
+                          ) : (
+                            bgImages.map((img) => (
+                              <div
+                                key={img}
+                                className="relative h-12 w-16 rounded-lg overflow-hidden border border-[var(--border-color)] bg-[var(--bg-hover)]"
+                              >
+                                <img src={img} alt="background" className="h-full w-full object-cover" />
+                                <button
+                                  onClick={() => removeBackground(story.id, img)}
+                                  className="absolute top-0.5 right-0.5 rounded-md bg-black/70 p-0.5 text-white hover:bg-red-600 transition-colors"
+                                  title="Remove background"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+
+                        {/* Upload + Paste URL */}
+                        <div className="flex items-center gap-2">
+                          <label className="flex shrink-0 items-center gap-1.5 rounded-lg bg-[var(--accent-light)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--accent)] border border-[var(--border-subtle)] cursor-pointer hover:bg-[var(--accent)] hover:text-white transition-colors">
+                            <Upload className="h-3.5 w-3.5" />
+                            Upload
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                if (e.target.files?.[0]) uploadBackground(story.id, e.target.files[0]);
+                                e.target.value = '';
+                              }}
+                            />
+                          </label>
+                          <input
+                            type="url"
+                            value={urlInputMap[story.id] || ''}
+                            onChange={(e) => setUrlInputMap({ ...urlInputMap, [story.id]: e.target.value })}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') addBackgroundUrl(story.id);
+                            }}
+                            placeholder="Paste image URL..."
+                            className="flex-1 min-w-0 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] px-2.5 py-1.5 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                          />
                           <button
-                            onClick={() => setEditingBgId(null)}
-                            className="rounded-md px-2 py-1 text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)]"
+                            onClick={() => addBackgroundUrl(story.id)}
+                            title="Add URL"
+                            className="rounded-lg bg-[var(--accent)] p-1.5 text-white hover:bg-[var(--accent-hover)] transition-colors"
                           >
-                            Cancel
-                          </button>
-                          <button
-                            onClick={() => handleUpdateBg(story.id)}
-                            className="rounded-md bg-[var(--accent)] px-2 py-1 text-[11px] font-semibold text-white"
-                          >
-                            Save URL
+                            <Plus className="h-3.5 w-3.5" />
                           </button>
                         </div>
                       </div>

@@ -1,22 +1,48 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useStory } from '../context/StoryContext';
+
+const CYCLE_MS = 20000;
+
+const getBgImages = (story) => {
+  if (story?.background_images && story.background_images.length > 0) return story.background_images;
+  if (story?.background_url) return [story.background_url];
+  if (story?.background_path) return [story.background_path];
+  return [];
+};
 
 export const AmbientBackground = () => {
   const { activeStory } = useStory();
+  const [images, setImages] = useState([]);
   const [bgUrl, setBgUrl] = useState('');
   const [fade, setFade] = useState(false);
+  const indexRef = useRef(0);
 
   useEffect(() => {
-    const url = activeStory?.background_url || activeStory?.background_path || '';
-    if (url !== bgUrl) {
+    const next = getBgImages(activeStory);
+    setImages(next);
+    const keepIndex = next.findIndex((u) => u === bgUrl);
+    indexRef.current = keepIndex >= 0 ? keepIndex : 0;
+    const url = next.length > 0 ? next[indexRef.current] : '';
+    setFade(true);
+    const timer = setTimeout(() => {
+      setBgUrl(url);
+      setFade(false);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [activeStory]);
+
+  useEffect(() => {
+    if (images.length < 2) return;
+    const interval = setInterval(() => {
+      indexRef.current = (indexRef.current + 1) % images.length;
       setFade(true);
-      const timer = setTimeout(() => {
-        setBgUrl(url);
+      setTimeout(() => {
+        setBgUrl(images[indexRef.current]);
         setFade(false);
       }, 300);
-      return () => clearTimeout(timer);
-    }
-  }, [activeStory, bgUrl]);
+    }, CYCLE_MS);
+    return () => clearInterval(interval);
+  }, [images]);
 
   if (!bgUrl) {
     return (
