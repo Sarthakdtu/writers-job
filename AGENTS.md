@@ -59,7 +59,7 @@ writer_job/
 │       │   ├── schemas.py    ← AIStatus, ModelInfo, AIConfig, AIJob, AIResult, PipelineSummary,
 │       │                       CustomSkill, RouterRequest, RouterDecision
 │       │   ├── prompts.py    ← SYSTEM_PREFIXES, TASKS, STAGE_LABELS, ROUTER_SYSTEM, step_messages
-│       │   ├── pipelines.py  ← PipelineDef registry: 18 analysis + 3 import pipelines
+│       │   ├── pipelines.py  ← PipelineDef registry: 19 analysis + 3 import pipelines
 │       │   ├── context.py    ← 18 context builders + build_context_from_sources (budget/drop)
 │       │   ├── store.py      ← AiStore: per-story ai/{config.json,jobs/,results/}
 │       │   ├── custom.py     ← Custom skill CRUD + duplicate + auto-routing
@@ -122,7 +122,8 @@ All request/response bodies are typed with Pydantic v2 models. The core entities
   `google_doc_ids{}`, `overview[]` (list of paragraphs edited on the per-story
   dashboard, mirroring character `notes`).
 - **`Character`** — `id`, `name`, `image_url`, `role`, `location` (home/origin location where the
-  character is from), `bio`, `notes[]`, `quotes[]` (memorable lines, shown on the story
+  character is from), `bio`, `persona` (optional narrative voice/style notes used by the Draft
+  Editor's "Rewrite Perspective" feature), `notes[]`, `quotes[]` (memorable lines, shown on the story
   dashboard), `gallery[]`,
   `artifact_ids[]`, `timeline_events[]` (`TimelineEvent`: `year_or_era`, `title`,
   `description`, `book_ids[]`), `plot_point_ids[]`.
@@ -309,7 +310,11 @@ files and simulates Drive sync; it sets `_backup_status` in **module-level memor
   `CustomSkill`, `RouterRequest`, `RouterDecision`.
 - `prompts.py`: `SYSTEM_PREFIXES`, `TASKS` for all 21 pipelines, `STAGE_LABELS`,
   `ROUTER_SYSTEM`, `step_messages` helper.
-- `pipelines.py`: `PipelineDef` registry — 18 analysis + 3 import pipelines.
+- `pipelines.py`: `PipelineDef` registry — 19 analysis + 3 import pipelines (incl. `perspective_rewrite`). Built-in `StepSpec`s
+  may set `model_preferred` to pin a specific installed model for that step (used by
+  `perspective_rewrite` → `qwen2.5:7b`, because the default reasoning model qwen3.5:9b is
+  far too slow for interactive rewrites and times out). `jobs._resolve_step_model` honors
+  `step.model_preferred` ahead of the family/config default.
 - `context.py`: 18 context builders + `SOURCE_BUILDERS` + `build_context_from_sources`
   with budget/drop logic and "sampled N" notes. All builders share the uniform
   signature `(fm, story, params=None)` — custom-skill runs assemble context here from

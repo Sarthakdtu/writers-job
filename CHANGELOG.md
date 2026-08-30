@@ -3,6 +3,40 @@
 Every time you change functionality, add a dated entry here summarizing what changed and
 update the relevant section(s) in AGENTS.md.
 
+- **2026-08-30 — Search bar in Character Roster.**
+  - Frontend: `CharacterRosterView` gained a `searchQuery` state filtering the roster by
+    name, role, or location (case-insensitive). A `Search` icon + input was added to both
+    the full roster grid header (when no character is selected) and the "Cast Roster"
+    horizontal strip (when one is). Filtered counts show as `(matches/total)`; an empty
+    match state is shown when the search yields no results.
+    
+- **2026-08-30 — Perspective / Persona Rewriter in the Draft Editor.**
+  - Backend: added optional `persona: Optional[str]` to `Character` (schemas.py) — a
+    character's narrative voice/style notes used to drive the Perspective Rewriter.
+  - AI: new built-in `perspective_rewrite` pipeline (pipelines.py, family analysis,
+    editor tab, `input_kind="text"`). New `perspective_rewrite` task in prompts.py with
+    `{{perspective}}` / `{{selection}}` placeholders; `step_messages` gained
+    `selection`/`perspective` kwargs. `jobs.py` now feeds the selected `RunInput.text`
+    + `params.perspective`/`params.character_id` into the message and context for this
+    pipeline. New `_perspective_context` builder in context.py returns the target
+    character's persona/profile, or a narrator/third-person directive for the
+    pseudo-ids `__narrator__` / `__third__`.
+  - **Latency fix:** `perspective_rewrite` was timing out (`Ollama request failed:`)
+    because the default reasoning model `qwen3.5:9b` takes >170s per completion on this
+    hardware and even returns empty content under `think=false`. Added optional
+    `model_preferred` to `StepSpec` and pinned the perspective step to `qwen2.5:7b`;
+    `jobs._resolve_step_model` honors `step.model_preferred` ahead of the family/config
+    default. Measured: ~8s to a full rewrite (vs 170s+ timeout). The Draft Editor modal
+    also now shows a clear message (instead of `{}`) when a finished job has no/empty
+    result.
+  - Frontend: `DraftEditorView` gained a "Rewrite Perspective" toolbar button + modal.
+    It captures the textarea selection, lets the user pick Character / Third person /
+    Narrator (character picker shows personas), runs `perspective_rewrite`, polls the
+    job, and offers "Replace selection" / "Insert at start" which splice the result into
+    the prose and trigger the normal autosave (no new save route needed). Character
+    create/edit modal in `CharacterRosterView` gained a "Narrative Persona" field; a
+    "Has persona" badge appears on the profile card.
+
 - **2026-08-30 — Fix blank-screen crash in AI results + add "How to use skills" help.**
   - The `mdStyle` maps passed to `react-markdown`'s `components` prop in
     `AIPanel.jsx` and `SkillStudioView.jsx` were plain **strings**, not component

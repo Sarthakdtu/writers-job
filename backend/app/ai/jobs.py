@@ -251,6 +251,8 @@ class JobManager:
             run_input = self._input_for_job(job, story_id)
             if run_input:
                 params = run_input.params or {}
+                if pipeline.id == "perspective_rewrite" and run_input.text:
+                    params.setdefault("selection", run_input.text)
 
             await self._maybe_route_custom(pipeline, job, cfg, notes)
 
@@ -278,6 +280,11 @@ class JobManager:
                 self.store.write_job(job)
 
                 custom_prompt = custom_skill.prompt if custom_skill else None
+                selection = ""
+                perspective = ""
+                if pipeline.id == "perspective_rewrite" and run_input is not None:
+                    selection = run_input.text or params.get("selection", "")
+                    perspective = params.get("perspective", "")
                 messages = prompt_mod.step_messages(
                     step.prompt_key,
                     context=context_str,
@@ -285,6 +292,8 @@ class JobManager:
                     custom_prompt=custom_prompt,
                     input_kind=pipeline.input_kind,
                     attach_context=attach_context,
+                    selection=selection,
+                    perspective=perspective,
                 )
                 if custom_skill and run_input is not None and run_input.text:
                     messages[-1]["content"] = (
@@ -371,6 +380,8 @@ class JobManager:
             "vision": cfg.vision_model or ai_config.get_vision_model(),
             "text": cfg.model or ai_config.get_default_model(),
         }.get(family, ai_config.get_default_model())
+        if step.model_preferred:
+            preferred = step.model_preferred
         needs = {"text"}
         if family in ("vision", "ocr"):
             needs.add("vision")

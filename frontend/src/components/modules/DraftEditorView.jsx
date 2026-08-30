@@ -16,7 +16,13 @@ import {
   Maximize2,
   ExternalLink,
   BookOpen,
-  ChevronDown
+  ChevronDown,
+  Sparkles,
+  Replace,
+  X,
+  Loader2,
+  UserRound,
+  UserRoundCog
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
 import ReactMarkdown from 'react-markdown';
@@ -55,6 +61,18 @@ export const DraftEditorView = () => {
 
   // Scene breakdown panel visibility
   const [showBreakdown, setShowBreakdown] = useState(true);
+
+  // Perspective Rewrite UI
+  const [characters, setCharacters] = useState([]);
+  const [showPerspectiveModal, setShowPerspectiveModal] = useState(false);
+  const [perspectiveKind, setPerspectiveKind] = useState('character'); // 'character' | 'third' | 'narrator'
+  const [perspectiveCharId, setPerspectiveCharId] = useState('');
+  const [perspectiveSelStart, setPerspectiveSelStart] = useState(0);
+  const [perspectiveSelEnd, setPerspectiveSelEnd] = useState(0);
+  const [perspectiveJob, setPerspectiveJob] = useState(null);
+  const [perspectiveResult, setPerspectiveResult] = useState('');
+  const [perspectiveError, setPerspectiveError] = useState('');
+  const [perspectiveLoading, setPerspectiveLoading] = useState(false);
 
   // Debounce save timer ref
   const saveTimeoutRef = useRef(null);
@@ -134,6 +152,55 @@ export const DraftEditorView = () => {
     loadChapterProse();
   }, [activeStory, selectedBookId, selectedChId]);
 
+  // Fetch characters (for the persona / perspective selectors)
+  useEffect(() => {
+    if (!activeStory) return;
+    const fetchChars = async () => {
+      try {
+        const res = await fetch(`/api/stories/${activeStory.id}/characters`);
+        if (res.ok) {
+          const data = await res.json();
+          setCharacters(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch characters for perspective rewrite:', err);
+      }
+    };
+    fetchChars();
+  }, [activeStory]);
+
+  // Poll perspective-rewrite job until done
+  useEffect(() => {
+    if (!activeStory || !perspectiveJob) return;
+    const id = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/ai/jobs/${activeStory.id}/${perspectiveJob.id}`);
+        if (!res.ok) return;
+        const job = await res.json();
+        setPerspectiveJob(job);
+        if (job.status === 'done') {
+          clearInterval(id);
+          setPerspectiveLoading(false);
+          const rres = await fetch(`/api/ai/results/${activeStory.id}/${perspectiveJob.pipeline}`);
+          if (rres.ok) {
+            const rj = await rres.json();
+            setPerspectiveResult(rj.content || '');
+            if (!rj.content) setPerspectiveError('Finished, but the model returned an empty result.');
+          } else {
+            setPerspectiveError('Finished, but the result could not be loaded.');
+          }
+        } else if (job.status === 'error' || job.status === 'cancelled') {
+          clearInterval(id);
+          setPerspectiveLoading(false);
+          setPerspectiveError(job.error_message || `Job ${job.status}.`);
+        }
+      } catch (err) {
+        console.error('Perspective job poll failed:', err);
+      }
+    }, 1500);
+    return () => clearInterval(id);
+  }, [activeStory, perspectiveJob?.id]);
+
   // Debounced Autosave Effect (1000ms delay)
   const handleProseChange = (e) => {
     const newContent = e.target.value;
@@ -200,6 +267,96 @@ export const DraftEditorView = () => {
     const replacement = prefix + selectedText + suffix;
     const newProse = prose.substring(0, start) + replacement + prose.substring(end);
     setProse(newProse);
+    saveProseToBackend(newProse);
+  };
+
+  // --- Perspective Rewrite handlers ---
+  const openPerspectiveModal = () => {
+    const textarea = document.getElementById('markdown-editor-textarea');
+    const start = textarea ? textarea.selectionStart : 0;
+    const end = textarea ? textarea.selectionEnd : 0;
+    setPerspectiveSelStart(start);
+    setPerspectiveSelEnd(end);
+    setPerspectiveKind('character');
+    setPerspectiveCharId(characters[0]?.id || '');
+    setPerspectiveJob(null);
+    setPerspectiveResult('');
+    setPerspectiveError('');
+    setShowPerspectiveModal(true);
+  };
+
+  const selectedProse = () => prose.substring(perspectiveSelStart, perspectiveSelEnd).trim();
+
+  const resetPerspectiveModal = () => {
+    setPerspectiveLoading(false);
+    setPerspectiveJob(null);
+    setPerspectiveResult('');
+    setPerspectiveError('');
+  };
+
+  const runPerspectiveRewrite = async () => {
+    if (!activeStory || !selectedProse()) return;
+    resetPerspectiveModal();
+    setPerspectiveLoading(true);
+    setPerspectiveError('');
+    let characterId = '__narrator__';
+    let perspective = '';
+    if (perspectiveKind === 'character') {
+      characterId = perspectiveCharId || '__narrator__';
+      const ch = characters.find((c) => c.id === characterId);
+      perspective = `first-person POV of ${ch?.name || characterId}`;
+    } else if (perspectiveKind === 'third') {
+      characterId = '__third__';
+      perspective = 'third-person limited POV';
+    } else {
+      characterId = '__narrator__';
+      perspective = 'narrator omniscient POV';
+    }
+    try {
+      const res = await fetch('/api/ai/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          story_id: activeStory.id,
+          skill: 'perspective_rewrite',
+          input: {
+            text: selectedProse(),
+            images: [],
+            params: { character_id: characterId, perspective },
+          },
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setPerspectiveError(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail || err));
+        setPerspectiveLoading(false);
+        return;
+      }
+      const job = await res.json();
+      setPerspectiveJob(job);
+    } catch (err) {
+      setPerspectiveError(String(err));
+      setPerspectiveLoading(false);
+    }
+  };
+
+  const applyPerspectiveResult = (mode) => {
+    if (!perspectiveResult) return;
+    const start = perspectiveSelStart;
+    const end = perspectiveSelEnd;
+    let newProse;
+    if (mode === 'replace') {
+      // Replace the selected passage with the rewrite
+      newProse = prose.substring(0, start) + perspectiveResult + prose.substring(end);
+    } else {
+      // Insert the rewrite at the selection start, keeping the original passage
+      newProse = prose.substring(0, start) + perspectiveResult + prose.substring(start);
+    }
+    setProse(newProse);
+    const words = newProse.trim().split(/\s+/).filter(Boolean).length;
+    setWordCount(words);
+    setShowPerspectiveModal(false);
+    setPerspectiveResult('');
     saveProseToBackend(newProse);
   };
 
@@ -387,6 +544,17 @@ export const DraftEditorView = () => {
             >
               <List className="h-4 w-4" />
             </button>
+
+            <span className="mx-1 h-5 w-px bg-[var(--border-color)]" />
+            <button
+              onClick={openPerspectiveModal}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white transition-all hover:opacity-90"
+              style={{ backgroundColor: 'var(--accent)' }}
+              title="Rewrite the selected passage from a different point of view (character persona, third person, or narrator)"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              Rewrite Perspective
+            </button>
           </div>
 
           {/* Split View Container: Markdown Editor Textarea & Live Preview */}
@@ -507,6 +675,159 @@ export const DraftEditorView = () => {
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Perspective Rewrite Modal */}
+      {showPerspectiveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in" onClick={() => setShowPerspectiveModal(false)}>
+          <div className="w-full max-w-lg rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] p-6 shadow-2xl space-y-4 animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-prose text-lg font-bold text-[var(--text-main)] flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-[var(--accent)]" />
+                Rewrite Perspective
+              </h3>
+              <button onClick={() => setShowPerspectiveModal(false)} className="text-[var(--text-muted)] hover:text-[var(--text-main)]" title="Close">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {!selectedProse() ? (
+              <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)] p-6 text-center space-y-2">
+                <Replace className="h-6 w-6 text-[var(--accent)] mx-auto opacity-60" />
+                <p className="text-xs text-[var(--text-muted)]">
+                  Select a passage in the editor first, then open this again. Nothing is selected to rewrite.
+                </p>
+                <button onClick={() => setShowPerspectiveModal(false)} className="mt-1 text-xs text-[var(--accent)] hover:underline">Close</button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-[11px] text-[var(--text-dim)] leading-relaxed">
+                  Rewriting <span className="font-semibold text-[var(--text-main)]">{selectedProse().split(/\s+/).filter(Boolean).length}</span> words from:
+                  <span className="block mt-0.5 line-clamp-3 rounded-lg bg-[var(--bg-base)] border border-[var(--border-subtle)] p-2 font-prose italic text-[var(--text-main)]">“{selectedProse().slice(0, 220)}{selectedProse().length > 220 ? '…' : ''}”</span>
+                </p>
+
+                {/* Perspective kind selector */}
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-semibold text-[var(--text-muted)] mb-1">Point of view</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => setPerspectiveKind('character')}
+                      className={`flex flex-col items-center gap-1 rounded-xl border px-2 py-2 text-[11px] font-semibold transition-all ${
+                        perspectiveKind === 'character' ? 'border-[var(--accent)] bg-[var(--accent-light)] text-[var(--accent)]' : 'border-[var(--border-color)] text-[var(--text-muted)] hover:border-[var(--accent)]'
+                      }`}
+                    >
+                      <UserRoundCog className="h-4 w-4" />
+                      Character
+                    </button>
+                    <button
+                      onClick={() => setPerspectiveKind('third')}
+                      className={`flex flex-col items-center gap-1 rounded-xl border px-2 py-2 text-[11px] font-semibold transition-all ${
+                        perspectiveKind === 'third' ? 'border-[var(--accent)] bg-[var(--accent-light)] text-[var(--accent)]' : 'border-[var(--border-color)] text-[var(--text-muted)] hover:border-[var(--accent)]'
+                      }`}
+                    >
+                      <UserRound className="h-4 w-4" />
+                      Third person
+                    </button>
+                    <button
+                      onClick={() => setPerspectiveKind('narrator')}
+                      className={`flex flex-col items-center gap-1 rounded-xl border px-2 py-2 text-[11px] font-semibold transition-all ${
+                        perspectiveKind === 'narrator' ? 'border-[var(--accent)] bg-[var(--accent-light)] text-[var(--accent)]' : 'border-[var(--border-color)] text-[var(--text-muted)] hover:border-[var(--accent)]'
+                      }`}
+                    >
+                      <BookOpen className="h-4 w-4" />
+                      Narrator
+                    </button>
+                  </div>
+                </div>
+
+                {/* Character picker */}
+                {perspectiveKind === 'character' && (
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-semibold text-[var(--text-muted)] mb-1">Whose persona?</label>
+                    <select
+                      value={perspectiveCharId}
+                      onChange={(e) => setPerspectiveCharId(e.target.value)}
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                    >
+                      {characters.length === 0 && <option value="">No characters yet</option>}
+                      {characters.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}{c.persona ? ' (persona)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {perspectiveCharId && (() => {
+                      const ch = characters.find((c) => c.id === perspectiveCharId);
+                      return ch?.persona ? (
+                        <p className="text-[10px] text-[var(--text-dim)] leading-relaxed">
+                          <span className="font-semibold text-[var(--accent)]">Persona:</span> {ch.persona}
+                        </p>
+                      ) : (
+                        <p className="text-[10px] text-[var(--text-dim)]">
+                          No narrative persona set — will use their profile. Add one in the Characters tab for a stronger voice.
+                        </p>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* Action / status area */}
+                {perspectiveError && (
+                  <div className="text-[11px] text-rose-400 bg-rose-400/10 rounded-lg p-2">{perspectiveError}</div>
+                )}
+
+                {!perspectiveResult && !perspectiveJob && (
+                  <button
+                    onClick={runPerspectiveRewrite}
+                    disabled={!selectedProse()}
+                    className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-[var(--accent)] py-2.5 text-xs font-semibold text-white hover:bg-[var(--accent-hover)] disabled:opacity-40"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Rewrite selection
+                  </button>
+                )}
+
+                {perspectiveJob && (perspectiveJob.status === 'running' || perspectiveJob.status === 'pending') && (
+                  <div className="flex items-center justify-center gap-2 text-[11px] text-[var(--text-dim)] py-2">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent)]" />
+                    {perspectiveJob.status === 'running' ? 'Rewriting…' : `Queued (pos ${perspectiveJob.queue_position})…`}
+                  </div>
+                )}
+
+                {perspectiveResult && (
+                  <div className="space-y-2 animate-in fade-in">
+                    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3 max-h-56 overflow-y-auto">
+                      <div className="text-[9px] uppercase tracking-wider text-[var(--text-dim)] mb-1">Rewrite</div>
+                      <p className="whitespace-pre-wrap font-prose text-[13px] text-[var(--text-main)] leading-relaxed">
+                        {perspectiveResult}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => applyPerspectiveResult('replace')}
+                        className="flex-1 rounded-lg bg-[var(--accent)] py-2 text-xs font-semibold text-white hover:bg-[var(--accent-hover)]"
+                      >
+                        Replace selection
+                      </button>
+                      <button
+                        onClick={() => applyPerspectiveResult('insert')}
+                        className="flex-1 rounded-lg border border-[var(--border-color)] py-2 text-xs font-semibold text-[var(--text-main)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                      >
+                        Insert at start
+                      </button>
+                    </div>
+                    <button
+                      onClick={resetPerspectiveModal}
+                      className="w-full text-center text-[11px] text-[var(--accent)] hover:underline"
+                    >
+                      Discard & rewrite again
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

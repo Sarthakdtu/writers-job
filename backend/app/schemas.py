@@ -16,6 +16,7 @@ class Character(BaseModel):
     role: Optional[str] = "Main Character"
     location: Optional[str] = ""
     bio: Optional[str] = ""
+    persona: Optional[str] = ""
     notes: List[str] = Field(default_factory=list)
     quotes: List[str] = Field(default_factory=list)
     gallery: List[str] = Field(default_factory=list)

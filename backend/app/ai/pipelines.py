@@ -15,6 +15,7 @@ from app.ai.schemas import PipelineSummary
 class StepSpec:
     prompt_key: str
     model_family: str = "text"
+    model_preferred: Optional[str] = None
     temperature: Optional[float] = None
     num_predict: Optional[int] = None
     pass_prev_output: bool = False
@@ -227,6 +228,22 @@ for _pid, _name, _desc, _temp in [
         system_prompt_key="creative" if _pid == "continue_writing" else "analysis",
         steps=[_text_step(_pid)],
     ))
+
+# Perspective / persona rewriter: rewords selected prose from a chosen point of view.
+# It needs selected prose text AND a perspective target (see RunInput param `perspective`).
+_register(PipelineDef(
+    id="perspective_rewrite",
+    name="Rewrite Perspective",
+    description="Rewords a selected passage into a chosen point of view: a character's persona, third person, or narrator.",
+    tabs=["editor"],
+    input_kind="text",
+    needs_selection=True,
+    selection_param="character_id",
+    context_builder="perspective_rewrite",
+    temperature=0.6,
+    system_prompt_key="creative",
+    steps=[_text_step("perspective_rewrite", model_preferred="qwen2.5:7b")],
+))
 
 # --- Import & Extract pipelines -------------------------------------------
 

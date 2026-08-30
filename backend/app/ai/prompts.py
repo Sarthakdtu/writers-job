@@ -131,6 +131,16 @@ TASKS: Dict[str, str] = {
         "alternative for each.\n\n"
         "Output structure:\n### Told → shown\n- told: …\n- shown: …",
     ),
+    "perspective_rewrite": (
+        "Rewrite the SELECTED PASSAGE below into the requested point of view, keeping its "
+        "facts, events, and emotional content intact.\n\n"
+        "Perspective instruction (use exactly this):\n{{perspective}}\n\n"
+        "Rewrite the passage and output ONLY the rewritten prose — no headings, no "
+        "explanations, no commentary. Match the tense and detail level of the original. "
+        "Preserve any inline Markdown formatting. Do not invent events that are not in the "
+        "selection.\n\n"
+        "SELECTED PASSAGE:\n{{selection}}"
+    ),
 
     # import / extract steps
     "ocr_extract": (
@@ -230,6 +240,8 @@ def step_messages(
     custom_prompt: Optional[str] = None,
     input_kind: str = "story_context",
     attach_context: bool = True,
+    selection: str = "",
+    perspective: str = "",
 ) -> List[Dict[str, Any]]:
     """Compose system+user messages for a single pipeline step."""
     if prompt_key in ("ocr_extract", "ocr_extract_all", "art_describe"):
@@ -248,6 +260,17 @@ def step_messages(
         return [
             {"role": "system", "content": SYSTEM_PREFIXES["creative"]},
             {"role": "user", "content": f"{prev_output}\n\n{TASKS.get(prompt_key, '')}"},
+        ]
+
+    if prompt_key == "perspective_rewrite":
+        task = TASKS.get(prompt_key, "")
+        task = task.replace("{{perspective}}", perspective or "Narrator omniscient point of view")
+        task = task.replace("{{selection}}", selection or "(no passage selected)")
+        if context:
+            task = f"{task}\n\nStory context (JSON):\n{context}"
+        return [
+            {"role": "system", "content": SYSTEM_PREFIXES["creative"]},
+            {"role": "user", "content": task},
         ]
 
     if custom_prompt:

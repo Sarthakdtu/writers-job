@@ -339,6 +339,47 @@ def _only_once(fm, story) -> List[str]:
 
 # --- public API --------------------------------------------------------------
 
+def _perspective_context(fm, story, params) -> Dict[str, Any]:
+    """Context for the perspective-rewrite skill: the target character's persona +
+    profile (or a narrator/third-person directive), plus the original selection."""
+    char_id = (params or {}).get("character_id")
+    selection = cap_text((params or {}).get("selection", ""), 8000)
+    if char_id in ("__narrator__", "__third__"):
+        if char_id == "__narrator__":
+            directive = (
+                "Rewrite in a narrator / omniscient third-person voice: a slightly "
+                "literary, observant narrator who knows what the characters feel and "
+                "reports the scene with distance and authority."
+            )
+        else:
+            directive = (
+                "Rewrite in a detached third-person limited voice: externally observing "
+                "the visible actions, dialogue, and setting, using he/she/they and the "
+                "relevant names, without entering the inner thoughts of a single character."
+            )
+        return {"perspective_directive": directive, "selection": selection}
+    chars = fm.list_characters(story.id)
+    char = next((c for c in chars if c.id == char_id), None)
+    if not char:
+        return {
+            "perspective_directive": "Narrator omniscient point of view.",
+            "selection": selection,
+        }
+    return {
+        "perspective_directive": (
+            "Rewrite in the first-person point of view of this character, thinking and "
+            "speaking exactly as they would (their voice, vocabulary, mood, and perception)."
+        ),
+        "character": {
+            "id": char.id, "name": char.name, "role": char.role, "location": char.location,
+            "bio": cap_text(char.bio or "", 2500),
+            "persona": cap_text(char.persona or "", 2500),
+            "notes": [cap_text(n, 500) for n in (char.notes or [])][:20],
+        },
+        "selection": selection,
+    }
+
+
 def build_context(
     pipeline_id: str,
     story,
@@ -454,6 +495,7 @@ def build_context(
             "book_beats": _book_beats_around(fm, story, params),
         },
         "show_tell": lambda: _chapter_context(fm, story, params),
+        "perspective_rewrite": lambda: _perspective_context(fm, story, params),
     }
     fn = builders.get(pipeline_id)
     if fn is None:

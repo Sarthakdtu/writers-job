@@ -22,7 +22,8 @@ import {
   ChevronRight,
   StickyNote,
   MapPin,
-  Quote
+  Quote,
+  Search
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
 import { ArtifactFormModal } from '../ArtifactFormModal';
@@ -52,6 +53,7 @@ export const CharacterRosterView = () => {
     location: '',
     image_url: '',
     bio: '',
+    persona: '',
   });
 
   // Story cities (for the "home location" suggestion datalist)
@@ -87,6 +89,19 @@ export const CharacterRosterView = () => {
 
   // Active detail tab (Notes is the default view)
   const [activeDetailTab, setActiveDetailTab] = useState('notes');
+
+  // Roster search
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const filteredCharacters = characters.filter((char) => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      (char.name || '').toLowerCase().includes(q) ||
+      (char.role || '').toLowerCase().includes(q) ||
+      (char.location || '').toLowerCase().includes(q)
+    );
+  });
 
   const detailTabs = [
     { id: 'notes', label: 'Notes', icon: StickyNote },
@@ -555,7 +570,7 @@ export const CharacterRosterView = () => {
 
         <button
           onClick={() => {
-            setCharForm({ id: '', name: '', role: 'Protagonist', location: '', image_url: '', bio: '' });
+            setCharForm({ id: '', name: '', role: 'Protagonist', location: '', image_url: '', bio: '', persona: '' });
             setImageSourceMode('upload');
             setShowCharModal(true);
           }}
@@ -570,7 +585,17 @@ export const CharacterRosterView = () => {
       {!selectedChar && (
         <div className="space-y-4">
           <h3 className="font-prose text-lg font-bold text-[var(--text-main)] flex items-center justify-between">
-            <span>Roster ({characters.length})</span>
+            <span>Roster ({filteredCharacters.length})</span>
+            <span className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-dim)]" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by name, role, or location..."
+                className="w-64 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] pl-8 pr-3 py-1.5 text-xs text-[var(--text-main)] placeholder:text-[var(--text-dim)] focus:border-[var(--accent)] focus:outline-hidden transition-colors"
+              />
+            </span>
           </h3>
 
           {characters.length === 0 && (
@@ -579,9 +604,15 @@ export const CharacterRosterView = () => {
             </div>
           )}
 
+          {characters.length > 0 && filteredCharacters.length === 0 && (
+            <div className="p-6 text-center literary-card rounded-xl text-xs text-[var(--text-muted)]">
+              No characters match "{searchQuery}".
+            </div>
+          )}
+
           {characters.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-              {characters.map((char) => {
+              {filteredCharacters.map((char) => {
                 return (
                   <div
                     key={char.id}
@@ -623,14 +654,24 @@ export const CharacterRosterView = () => {
       {/* Circle-Thumbnail Cast Strip: shown once a character is selected */}
       {selectedChar && (
         <div className="literary-card rounded-2xl p-4">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between gap-3 mb-3">
             <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
               <Users className="h-3.5 w-3.5 text-[var(--accent)]" />
-              <span>Cast Roster ({characters.length})</span>
+              <span>Cast Roster ({filteredCharacters.length}/{characters.length})</span>
+            </span>
+            <span className="relative shrink-0">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-dim)]" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search cast..."
+                className="w-56 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] pl-8 pr-3 py-1.5 text-xs text-[var(--text-main)] placeholder:text-[var(--text-dim)] focus:border-[var(--accent)] focus:outline-hidden transition-colors"
+              />
             </span>
           </div>
           <div className="flex items-end gap-4 overflow-x-auto pb-1">
-            {characters.map((char) => {
+            {filteredCharacters.map((char) => {
               const isSelected = selectedChar?.id === char.id;
               return (
                 <button
@@ -668,7 +709,7 @@ export const CharacterRosterView = () => {
             })}
             <button
               onClick={() => {
-                setCharForm({ id: '', name: '', role: 'Protagonist', location: '', image_url: '', bio: '' });
+                setCharForm({ id: '', name: '', role: 'Protagonist', location: '', image_url: '', bio: '', persona: '' });
                 setImageSourceMode('upload');
                 setShowCharModal(true);
               }}
@@ -718,6 +759,7 @@ export const CharacterRosterView = () => {
                           location: selectedChar.location || '',
                           image_url: selectedChar.image_url || '',
                           bio: selectedChar.bio || '',
+                          persona: selectedChar.persona || '',
                         });
                         setImageSourceMode(selectedChar.image_url?.startsWith('/api/stories/') ? 'upload' : 'url');
                         setShowCharModal(true);
@@ -752,6 +794,12 @@ export const CharacterRosterView = () => {
                         <span className="inline-flex items-center gap-1 rounded-lg bg-[var(--bg-base)] px-3 py-1 text-xs font-semibold text-[var(--text-muted)] border border-[var(--border-subtle)] mt-1 ml-1.5">
                           <MapPin className="h-3.5 w-3.5 text-[var(--accent)]" />
                           {selectedChar.location}
+                        </span>
+                      )}
+                      {selectedChar.persona && (
+                        <span className="mt-1 ml-1 inline-flex items-center gap-1 rounded-lg bg-[var(--accent-light)] px-3 py-1 text-xs font-semibold text-[var(--accent)] border border-[var(--border-subtle)]" title={selectedChar.persona}>
+                          <Sparkles className="h-3.5 w-3.5" />
+                          Has persona
                         </span>
                       )}
                     </div>
@@ -1616,6 +1664,22 @@ export const CharacterRosterView = () => {
                   placeholder="Background story, personality traits, motivations..."
                   className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                  Narrative Persona <span className="normal-case font-normal text-[var(--text-dim)]">(optional — voice for Perspective Rewrite)</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={charForm.persona}
+                  onChange={(e) => setCharForm({ ...charForm, persona: e.target.value })}
+                  placeholder="e.g. Sharp, sardonic wit; clipped sentences; notices others' hands and weather. POV thoughts stay guarded."
+                  className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                />
+                <p className="mt-1 text-[10px] text-[var(--text-dim)]">
+                  Describes how this character's inner voice sounds. Used when rewriting a passage from their point of view.
+                </p>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
