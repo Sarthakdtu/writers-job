@@ -65,18 +65,24 @@ async def create(
     existing = {s.id for s in skills}
     skill_id = _gen_id(payload.name, existing)
     now = _now()
-    decision = await route({"name": payload.name, "description": payload.description,
-                            "prompt": payload.prompt, "hint": payload.hint})
+
+    locked_manual = payload.routing_mode == "locked" and payload.routing_sources is not None
+    decision: Optional[RouterDecision] = None
+    if not locked_manual:
+        decision = await route({"name": payload.name, "description": payload.description,
+                                "prompt": payload.prompt, "hint": payload.hint})
     skill = CustomSkill(
         **payload.model_dump(),
         id=skill_id,
         routing={
-            "mode": "auto",
-            "sources": decision.sources,
-            "params_hint": decision.params_hint,
-            "reason": decision.reason,
+            "mode": payload.routing_mode or "auto",
+            "sources": (payload.routing_sources if locked_manual
+                        else (decision.sources if decision is not None else [])),
+            "params_hint": decision.params_hint if decision is not None else [],
+            "reason": ("user-locked sources" if locked_manual
+                       else (decision.reason if decision is not None else "")),
             "routed_at": now,
-            "routed_by": decision.routed_by,
+            "routed_by": decision.routed_by if decision is not None else "fallback",
         },
         created_at=now,
         updated_at=now,
@@ -106,6 +112,10 @@ async def update(
                                 "prompt": payload.prompt, "hint": payload.hint})
     upd = current.model_copy(update=payload.model_dump(), deep=False)
     upd.updated_at = now
+    if payload.routing_mode:
+        upd.routing.mode = payload.routing_mode
+    if payload.routing_mode == "locked" and payload.routing_sources is not None:
+        upd.routing.sources = payload.routing_sources
     if reroute and decision is not None:
         upd.routing.sources = decision.sources
         upd.routing.params_hint = decision.params_hint

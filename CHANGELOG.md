@@ -3,6 +3,46 @@
 Every time you change functionality, add a dated entry here summarizing what changed and
 update the relevant section(s) in AGENTS.md.
 
+- **2026-08-30 — Fix blank-screen crash in AI results + add "How to use skills" help.**
+  - The `mdStyle` maps passed to `react-markdown`'s `components` prop in
+    `AIPanel.jsx` and `SkillStudioView.jsx` were plain **strings**, not component
+    functions. Rendering a result threw `Invalid tag: <className string>` — an
+    uncaught render error that unmounted the whole React tree (blank screen) exactly
+    when a skill produced output. Converted every entry to a small functional
+    component; verified by Node render test (`[OLD] CRASH Invalid tag …`, `[NEW]
+    OK`).
+  - New shared `components/AiHelpModal.jsx` (7-step how-to + troubleshooting) opened
+    from a 🛈 button in the AIPanel header and a "How to use" button in Skill Studio.
+  - New `AppErrorBoundary` in `App.jsx` wraps `MainLayout`: any future render error
+    shows a friendly card with the error message + Reload instead of a blank page.
+
+- **2026-08-30 — AI pipeline end-to-end + frontend wiring fixes.**
+  - `ai/config.py`: new `get_router_timeout_s()` (`OLLAMA_ROUTER_TIMEOUT_S`, default 20s).
+  - `ai/router.py`: `_llm_route` call in `route_skill` is wrapped in `asyncio.wait_for`;
+    on timeout it returns the keyword-fallback decision instead of hanging (Skill Studio
+    stays responsive on slow models like qwen3.5:9b).
+  - `ai/schemas.py`: `CustomSkillPayload` now accepts `routing_mode` (`auto|locked`) and
+    `routing_sources` (manual chip list).
+  - `ai/custom.py`: `create`/`update`/`duplicate` honor locked mode — when
+    `routing_mode=="locked"` and `routing_sources` are given, save is instant (no router
+    call) and the manual sources are persisted verbatim; otherwise the router (LLM or
+    fallback) computes sources.
+  - `ai/context.py`: fixed arity bug — all per-source builders (`overview`, `mechanics`,
+    `timeline`, `gallery`) now use the uniform `(fm, story, params=None)` signature, so
+    `build_context_from_sources` (custom-skill runs) no longer crashes with
+    `TypeError`. Previously custom skills ran with `sources=["none"]` context.
+  - Frontend: `components/AIPanel.jsx` rewritten (per-tab skill cards, running/queued
+    state + stage + elapsed, enable/disable toggle that correctly uses the full skill id
+    list, image picker for import skills, markdown results via react-markdown/remark-gfm —
+    no Tailwind typography plugin installed).
+  - Frontend: new `components/modules/SkillStudioView.jsx` (Phase 5) — custom skill
+    CRUD, duplicate/delete, Context-Router preview with editable + lockable source chips,
+    test-run (saves-then-runs) with inline poll result; built-ins shown read-only.
+    `App.jsx` switch gained `case 'ai'` (previously fell through to Home — the visible
+    breakage). `routing_mode`/`routing_sources` persisted through the Studio.
+  - Verified end-to-end on `tales-of-sonnet`: locked create is ~70ms and skips the router;
+    custom-skill job → poll → done → result citing real story content.
+
 - **2026-08-29 — Standalone Quotes feature (independent of characters).**
   - New `Quote` schema (`schemas.py`): `id`, `text`, `note` (short context note),
     `tags: List[str]` (book / chapter / character / free-form).

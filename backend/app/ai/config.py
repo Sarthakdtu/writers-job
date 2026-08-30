@@ -37,6 +37,15 @@ def get_ollama_timeout_s() -> float:
         return 300.0
 
 
+def get_router_timeout_s() -> float:
+    """Max wall-clock allowed for one LLM routing call before falling back to the
+    keyword matcher. Keeps Skill Studio responsive even on slow default models."""
+    try:
+        return float(os.getenv("OLLAMA_ROUTER_TIMEOUT_S", "20"))
+    except ValueError:
+        return 20.0
+
+
 def get_context_budget_chars() -> int:
     try:
         return int(os.getenv("OLLAMA_CONTEXT_BUDGET_CHARS", "40000"))

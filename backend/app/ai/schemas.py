@@ -112,6 +112,8 @@ class CustomSkillPayload(BaseModel):
     max_images: int = 0
     save_targets: List[str] = Field(default_factory=list)
     hint: Optional[str] = None
+    routing_mode: Optional[Literal["auto", "locked"]] = None
+    routing_sources: Optional[List[str]] = None
 
 
 class RoutingBlock(BaseModel):

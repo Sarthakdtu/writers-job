@@ -79,12 +79,13 @@ writer_job/
 │       │   ├── StoryContext.jsx   ← Global story state, activeTab, hotkeys, story CRUD
 │       │   └── ThemeContext.jsx   ← Theme state (sepia/midnight/typewriter)
 │       └── components/
-│           ├── Navbar.jsx              ← Story selector, theme picker, ⌘K, Drive backup, focus
-│           ├── Sidebar.jsx             ← NAV_ITEMS + active universe badge
+│           ├── Navbar.jsx              ← Story selector, theme picker, ⌘K, Drive backup, focus, AI panel toggle
+│           ├── Sidebar.jsx             ← NAV_ITEMS (incl. Skill Studio → activeTab 'ai') + active universe badge
 │           ├── QuickSearchModal.jsx    ← ⌘K global search (stories/chars/cities/books/chapters)
 │           ├── AmbientBackground.jsx   ← story background_url cross-fade layer
 │           ├── GoogleDriveModal.jsx    ← backup status + trigger sync
 │           ├── ArtifactFormModal.jsx   ← shared artifact create/edit modal
+│           ├── AIPanel.jsx             ← ⌘⇧A right-drawer: per-tab skill cards, run/cancel, config, image picker
 │           └── modules/
 │               ├── HomeView.jsx             ← Home page: all-stories gallery, tags, New Story
 │               ├── DashboardView.jsx        ← Per-story dashboard: overview, fun-facts, theme, memorable quotes (character + standalone)
@@ -92,7 +93,10 @@ writer_job/
 │               ├── CharacterRosterView.jsx  ← Roster, gallery, artifacts, appearances, timeline (first portrait auto-added to gallery)
 │               ├── BookOutlinerView.jsx     ← Book/chapter tree, plot beats, arcs, POV tracker
 │               ├── QuotesView.jsx           ← Standalone quotes (text + note + tags) tab
-│               └── DraftEditorView.jsx      ← Markdown + Google Docs dual mode, autosave
+│               ├── DraftEditorView.jsx      ← Markdown + Google Docs dual mode, autosave
+│               └── SkillStudioView.jsx      ← Skill Studio (activeTab 'ai'): custom skill CRUD,
+│                                              router preview + editable/lockable source chips,
+│                                              test-run with inline result (react-markdown, no prose plugin)
 ├── data/
 │   └── stories/
 │       └── <story-slug>/     ← Per-story data (see §4). Git-ignored.
@@ -284,7 +288,9 @@ files and simulates Drive sync; it sets `_backup_status` in **module-level memor
   (`http://localhost:11434`), `OLLAMA_DEFAULT_MODEL` (`qwen3.5:9b`),
   `OLLAMA_OCR_MODEL` (`glm-ocr:latest`), `OLLAMA_VISION_MODEL` (`minicpm-v:latest`),
   `OLLAMA_ROUTER_MODEL` (`defaults to OLLAMA_DEFAULT_MODEL`), `OLLAMA_TIMEOUT_S` (`300`),
-  `OLLAMA_CONTEXT_BUDGET_CHARS` (`40000`), `OLLAMA_TEMPERATURE` (`0.2`),
+  `OLLAMA_ROUTER_TIMEOUT_S` (`20` — max wall-clock for one LLM routing call before
+  `asyncio.wait_for` falls back to keyword matching; keeps Skill Studio/CRUD responsive
+  on slow models), `OLLAMA_CONTEXT_BUDGET_CHARS` (`40000`), `OLLAMA_TEMPERATURE` (`0.2`),
   `OLLAMA_MAX_IMAGES_PER_RUN` (`6`), `OLLAMA_CAPABILITY_OVERRIDES` (empty; format
   `family:caps;[...]` e.g. `gemma4:text,vison` — escape hatch for exotic models).
 
@@ -305,11 +311,17 @@ files and simulates Drive sync; it sets `_backup_status` in **module-level memor
   `ROUTER_SYSTEM`, `step_messages` helper.
 - `pipelines.py`: `PipelineDef` registry — 18 analysis + 3 import pipelines.
 - `context.py`: 18 context builders + `SOURCE_BUILDERS` + `build_context_from_sources`
-  with budget/drop logic and "sampled N" notes.
+  with budget/drop logic and "sampled N" notes. All builders share the uniform
+  signature `(fm, story, params=None)` — custom-skill runs assemble context here from
+  `routing.sources` (built-in pipelines use `build_context`).
 - `store.py`: `AiStore` — per-story `ai/{config.json,jobs/,results/}` persistence.
 - `custom.py`: async custom skill CRUD + duplicate + auto-routing (`route_skill`).
-- `router.py`: Context Router — LLM routing (format=json, temp=0, think=false) +
-  keyword fallback; `route_skill` returns `RouterDecision` with `routed_by` badge.
+  `create`/`update` skip the router when `routing_mode=="locked"` + explicit
+  `routing_sources` are provided (instant save of manually curated chips).
+- `router.py`: Context Router — LLM routing (format=json, temp=0, think=false) + keyword
+  fallback; the LLM call is bounded by `OLLAMA_ROUTER_TIMEOUT_S` (`asyncio.wait_for`) so
+  slow models fall back instead of hanging. `route_skill` returns `RouterDecision` with
+  `routed_by` badge.
 - `jobs.py`: `JobManager` — per-story FIFO queue, one runner per story, cancel,
   `recover_interrupted` startup hook, per-step model resolution via story config
   overrides, image staging.

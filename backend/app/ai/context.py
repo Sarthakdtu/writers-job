@@ -67,7 +67,7 @@ def _save_notes(notes: Optional[List[str]], msg: str) -> None:
 
 # --- per-source builders (used by the Context Router) ----------------------
 
-def build_overview(fm, story) -> Dict[str, Any]:
+def build_overview(fm, story, params=None) -> Dict[str, Any]:
     return {
         "title": getattr(story, "title", ""),
         "tags": list(getattr(story, "tags", []) or []),
@@ -121,7 +121,7 @@ def _build_glossary(fm, story) -> Dict[str, Any]:
     ]}
 
 
-def build_mechanics(fm, story) -> Dict[str, Any]:
+def build_mechanics(fm, story, params=None) -> Dict[str, Any]:
     m = fm.get_world_mechanics(story.id)
     return {"mechanics": {
         "magic_system": m.magic_system,
@@ -191,7 +191,7 @@ def build_chapter_prose(fm, story, params=None) -> Dict[str, Any]:
     return {"chapter_openings": openings}
 
 
-def build_timeline(fm, story) -> Dict[str, Any]:
+def build_timeline(fm, story, params=None) -> Dict[str, Any]:
     events = []
     for c in fm.list_characters(story.id):
         for e in (c.timeline_events or []):
@@ -202,7 +202,7 @@ def build_timeline(fm, story) -> Dict[str, Any]:
     return {"timeline": events[:80]}
 
 
-def build_gallery(fm, story) -> Dict[str, Any]:
+def build_gallery(fm, story, params=None) -> Dict[str, Any]:
     gal = fm.get_world_section(story.id, "gallery")
     items = []
     if isinstance(gal, list):

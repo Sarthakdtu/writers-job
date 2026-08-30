@@ -9,6 +9,7 @@ client read?" Two paths:
 """
 import json
 import re
+import asyncio
 from typing import Dict, List, Optional
 
 from app.ai import config as ai_config
@@ -55,8 +56,13 @@ async def route_skill(
         models = await _installed_models(client)
         if not models:
             return _keyword_decision(name, description, prompt, hint)
-        decision = await _llm_route(client, models, payload)
+        timeout = ai_config.get_router_timeout_s()
+        decision = await asyncio.wait_for(
+            _llm_route(client, models, payload), timeout=timeout
+        )
         return decision
+    except asyncio.TimeoutError:
+        return _keyword_decision(name, description, prompt, hint)
     except (OllamaError, Exception):
         return _keyword_decision(name, description, prompt, hint)
 

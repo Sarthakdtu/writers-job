@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, Component } from 'react';
 import { ThemeProvider } from './context/ThemeContext';
 import { StoryProvider, useStory } from './context/StoryContext';
 import { Navbar } from './components/Navbar';
@@ -16,7 +16,37 @@ import { CharacterRosterView } from './components/modules/CharacterRosterView';
 import { BookOutlinerView } from './components/modules/BookOutlinerView';
 import { DraftEditorView } from './components/modules/DraftEditorView';
 import { QuotesView } from './components/modules/QuotesView';
+import { SkillStudioView } from './components/modules/SkillStudioView';
 import { GoogleDriveModal } from './components/GoogleDriveModal';
+
+class AppErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="min-h-screen flex items-center justify-center p-6" style={{ backgroundColor: 'var(--bg-base)' }}>
+          <div className="max-w-md w-full rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] p-6 text-center shadow-2xl">
+            <p className="font-prose text-lg font-bold text-[var(--text-main)] mb-2">Something went wrong</p>
+            <p className="text-xs text-[var(--text-muted)] mb-4">An unexpected error crashed this view. Reload the page; if it keeps happening, the message below will help us fix it.</p>
+            <pre className="text-[11px] text-rose-400 bg-[var(--bg-base)] rounded-lg p-3 text-left overflow-auto whitespace-pre-wrap font-mono max-h-48">{String(this.state.error)}</pre>
+            <button onClick={() => window.location.reload()} className="mt-4 rounded-lg px-4 py-2 text-xs font-semibold text-white" style={{ backgroundColor: 'var(--accent)' }}>
+              Reload
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const MainLayout = () => {
   const { activeTab, focusMode, setFocusMode, aiPanelOpen, setAiPanelOpen } = useStory();
@@ -38,6 +68,8 @@ const MainLayout = () => {
         return <DraftEditorView />;
       case 'quotes':
         return <QuotesView />;
+      case 'ai':
+        return <SkillStudioView />;
       default:
         return <HomeView />;
     }
@@ -95,7 +127,9 @@ export default function App() {
   return (
     <ThemeProvider>
       <StoryProvider>
-        <MainLayout />
+        <AppErrorBoundary>
+          <MainLayout />
+        </AppErrorBoundary>
       </StoryProvider>
     </ThemeProvider>
   );
