@@ -5,8 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.schemas import (
-    Story, Character, CharacterAppearances, WorldMechanics, City, Faction, Artifact, GlossaryTerm,
-    Quote, Book, Chapter, Plot, CharacterArc, StoryImageItem
+    Story, Character, CharacterAppearances, CharacterMap, WorldMechanics, City, Faction, Artifact,
+    GlossaryTerm, Quote, Book, Chapter, Plot, CharacterArc, StoryImageItem, EntityRefItem
 )
 from app.file_manager import FileManager
 from app.ai.ollama import OllamaClient, cached_models
@@ -64,6 +64,11 @@ def list_stories():
     return file_manager.list_stories()
 
 
+@app.get("/api/stories/deleted", response_model=List[Story])
+def list_deleted_stories():
+    return file_manager.get_deleted_stories()
+
+
 @app.post("/api/stories", response_model=Story)
 def create_story(story: Story):
     return file_manager.save_story(story)
@@ -85,11 +90,21 @@ def update_story(story_id: str, story: Story):
 
 
 @app.delete("/api/stories/{story_id}")
-def delete_story(story_id: str):
-    success = file_manager.delete_story(story_id)
+def delete_story(story_id: str, hard: bool = Query(False)):
+    success = file_manager.delete_story(story_id, hard=hard)
     if not success:
         raise HTTPException(status_code=400, detail=f"Failed to delete story '{story_id}'")
-    return {"message": f"Story '{story_id}' deleted successfully"}
+    return {
+        "message": f"Story '{story_id}' {'permanently deleted' if hard else 'moved to trash'}"
+    }
+
+
+@app.post("/api/stories/{story_id}/restore")
+def restore_story(story_id: str):
+    success = file_manager.restore_story(story_id)
+    if not success:
+        raise HTTPException(status_code=400, detail=f"Failed to restore story '{story_id}'")
+    return {"message": f"Story '{story_id}' restored successfully"}
 
 
 # --- Asset Upload & Serving Endpoints ---
@@ -169,6 +184,11 @@ def get_character_appearances(story_id: str, char_id: str):
     return file_manager.get_character_appearances(story_id, char_id)
 
 
+@app.get("/api/stories/{story_id}/character-map", response_model=CharacterMap)
+def get_character_map(story_id: str):
+    return file_manager.get_character_map(story_id)
+
+
 # --- 3. Worldbuilding Endpoints ---
 
 @app.get("/api/stories/{story_id}/world/{section}")
@@ -197,6 +217,11 @@ def save_quotes(story_id: str, quotes: List[Quote]):
 @app.get("/api/stories/{story_id}/images/library", response_model=List[StoryImageItem])
 def get_story_image_library(story_id: str):
     return file_manager.get_image_library(story_id)
+
+
+@app.get("/api/stories/{story_id}/references", response_model=List[EntityRefItem])
+def get_story_references(story_id: str):
+    return file_manager.get_references(story_id)
 
 
 @app.get("/api/stories/{story_id}/fun-facts", response_model=List[str])

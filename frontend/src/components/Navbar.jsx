@@ -10,10 +10,13 @@ import {
   Check,
   ChevronDown,
   Maximize2,
-  Bot
+  Bot,
+  Download,
+  CheckCircle2
 } from 'lucide-react';
 import { useStory } from '../context/StoryContext';
 import { useTheme } from '../context/ThemeContext';
+import { usePwaInstallPrompt } from '../hooks/usePwaInstallPrompt';
 
 export const Navbar = ({ onOpenBackupModal }) => {
   const {
@@ -31,6 +34,7 @@ export const Navbar = ({ onOpenBackupModal }) => {
   } = useStory();
 
   const { theme, setTheme, THEMES } = useTheme();
+  const { canInstall, isInstalled, promptInstall } = usePwaInstallPrompt();
   const [showStoryDropdown, setShowStoryDropdown] = useState(false);
   const [showThemeDropdown, setShowThemeDropdown] = useState(false);
   const [showNewStoryModal, setShowNewStoryModal] = useState(false);
@@ -193,6 +197,24 @@ export const Navbar = ({ onOpenBackupModal }) => {
               </div>
             )}
           </div>
+
+          {/* Install App Button */}
+          <button
+            onClick={promptInstall}
+            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all shadow-xs ${
+              isInstalled
+                ? 'border border-[var(--border-color)] bg-[var(--bg-card)] text-emerald-500'
+                : 'border border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-main)] hover:border-[var(--accent)] hover:bg-[var(--accent-light)]'
+            }`}
+            title={isInstalled ? 'App installed — can now be opened like a desktop app' : (canInstall ? 'Install LoreSmith as a desktop app' : 'Use your browser menu → Install app to add LoreSmith to your device')}
+          >
+            {isInstalled ? (
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+            ) : (
+              <Download className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+            )}
+            <span className="hidden sm:inline">{isInstalled ? 'Installed' : 'Install'}</span>
+          </button>
 
           {/* Google Drive Sync Button with Status Badge */}
           <button

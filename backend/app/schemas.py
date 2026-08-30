@@ -94,6 +94,20 @@ class StoryImageItem(BaseModel):
     character_name: Optional[str] = None
 
 
+class EntityRefItem(BaseModel):
+    """
+    One referenceable entity for the @-mention picker and hover previews.
+    `type` is one of: character | city | faction | artifact | glossary.
+    `overview` is a short text blurb shown in the hover tooltip.
+    """
+    type: str
+    id: str
+    name: str
+    label: str = ""
+    image_url: str = ""
+    overview: str = ""
+
+
 class PlotSubsection(BaseModel):
     title: str
     description: str
@@ -165,6 +179,43 @@ class CharacterAppearances(BaseModel):
     plot_points: List[AppearancePlotPoint] = Field(default_factory=list)
 
 
+class CharacterMapNode(BaseModel):
+    id: str
+    name: str
+    image_url: Optional[str] = ""
+    role: Optional[str] = ""
+    degree: int = 0
+
+
+class CharacterMapChapter(BaseModel):
+    book_id: str
+    book_title: str
+    id: str
+    title: str
+
+
+class CharacterMapInteraction(BaseModel):
+    book_id: str
+    book_title: str
+    beat_id: str
+    beat_title: str
+    beat_description: Optional[str] = ""
+    chapter: Optional[CharacterMapChapter] = None
+
+
+class CharacterMapEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+    weight: int = 1
+    interactions: List[CharacterMapInteraction] = Field(default_factory=list)
+
+
+class CharacterMap(BaseModel):
+    nodes: List[CharacterMapNode] = Field(default_factory=list)
+    edges: List[CharacterMapEdge] = Field(default_factory=list)
+
+
 class Story(BaseModel):
     id: str
     title: str
@@ -176,3 +227,5 @@ class Story(BaseModel):
     background_path: Optional[str] = ""
     google_doc_ids: Dict[str, str] = Field(default_factory=dict)
     overview: List[str] = Field(default_factory=list)
+    deleted: bool = Field(default=False)
+    deleted_at: Optional[str] = None

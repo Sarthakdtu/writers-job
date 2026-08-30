@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Users,
   UserPlus,
@@ -20,13 +20,18 @@ import {
   Gem,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
+  ChevronDown,
   StickyNote,
   MapPin,
   Quote,
-  Search
+  Search,
+  GripVertical
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
 import { ArtifactFormModal } from '../ArtifactFormModal';
+import { useEntityMention } from './entityRef/EntityMentionPicker';
+import { EntityReferenceText } from './entityRef/EntityReference';
 
 export const CharacterRosterView = () => {
   const { activeStory } = useStory();
@@ -34,6 +39,7 @@ export const CharacterRosterView = () => {
   const [selectedChar, setSelectedChar] = useState(null);
   const [appearances, setAppearances] = useState(null);
   const [loading, setLoading] = useState(false);
+  const prevSelectedCharId = useRef(null);
 
   // Modals
   const [showCharModal, setShowCharModal] = useState(false);
@@ -66,6 +72,8 @@ export const CharacterRosterView = () => {
     description: '',
     book_ids: '',
   });
+  const [editingEventIdx, setEditingEventIdx] = useState(null);
+  const [dragEventIdx, setDragEventIdx] = useState(null);
 
   // Artifact state
   const [storyArtifacts, setStoryArtifacts] = useState([]);
@@ -80,6 +88,10 @@ export const CharacterRosterView = () => {
   const [noteDraft, setNoteDraft] = useState('');
   const [editingNoteIdx, setEditingNoteIdx] = useState(null);
   const [editingNoteDraft, setEditingNoteDraft] = useState('');
+
+  // Entity references (@-mention picker + note rendering)
+  const [entityRefs, setEntityRefs] = useState([]);
+  const entityMention = useEntityMention(entityRefs);
 
   // Character quotes (inline, no modal)
   const [showQuoteInput, setShowQuoteInput] = useState(false);
@@ -179,8 +191,29 @@ export const CharacterRosterView = () => {
   }, [activeStory]);
 
   useEffect(() => {
+    if (!activeStory) return;
+    let cancelled = false;
+    const fetchRefs = async () => {
+      try {
+        const res = await fetch(`/api/stories/${activeStory.id}/references`);
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled) setEntityRefs(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch entity references:', err);
+      }
+    };
+    fetchRefs();
+    return () => { cancelled = true; };
+  }, [activeStory]);
+
+  useEffect(() => {
     if (selectedChar) {
-      setActiveDetailTab('notes');
+      if (prevSelectedCharId.current !== selectedChar.id) {
+        setActiveDetailTab('notes');
+        prevSelectedCharId.current = selectedChar.id;
+      }
       fetchAppearances(selectedChar.id);
     }
     fetchStoryArtifacts();
@@ -499,7 +532,7 @@ export const CharacterRosterView = () => {
     }
   };
 
-  const handleAddTimelineEvent = async (e) => {
+  const handleSaveTimelineEvent = async (e) => {
     e.preventDefault();
     if (!selectedChar || !eventForm.title.trim()) return;
 
@@ -511,7 +544,11 @@ export const CharacterRosterView = () => {
       book_ids: bookList,
     };
 
-    const updatedEvents = [...(selectedChar.timeline_events || []), newEvent];
+    const isEditing = editingEventIdx !== null;
+    const currentEvents = selectedChar.timeline_events || [];
+    const updatedEvents = isEditing
+      ? currentEvents.map((evt, i) => (i === editingEventIdx ? newEvent : evt))
+      : [...currentEvents, newEvent];
     const updatedChar = { ...selectedChar, timeline_events: updatedEvents };
 
     try {
@@ -526,11 +563,106 @@ export const CharacterRosterView = () => {
         setSelectedChar(saved);
         setCharacters((prev) => prev.map((c) => (c.id === saved.id ? saved : c)));
         setShowEventModal(false);
+        setEditingEventIdx(null);
         setEventForm({ year_or_era: '', title: '', description: '', book_ids: '' });
       }
     } catch (err) {
-      console.error('Failed to add timeline event:', err);
+      console.error('Failed to save timeline event:', err);
     }
+  };
+
+  const handleEditTimelineEvent = (idx) => {
+    const evt = (selectedChar.timeline_events || [])[idx];
+    if (!evt) return;
+    setEventForm({
+      year_or_era: evt.year_or_era || '',
+      title: evt.title || '',
+      description: evt.description || '',
+      book_ids: (evt.book_ids || []).join(', '),
+    });
+    setEditingEventIdx(idx);
+    setShowEventModal(true);
+  };
+
+  const handleDeleteTimelineEvent = async (idx) => {
+    if (!selectedChar || !confirm('Are you sure you want to delete this timeline event?')) return;
+    const updatedEvents = (selectedChar.timeline_events || []).filter((_, i) => i !== idx);
+    const updatedChar = { ...selectedChar, timeline_events: updatedEvents };
+    try {
+      const res = await fetch(`/api/stories/${activeStory.id}/characters`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedChar),
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setSelectedChar(saved);
+        setCharacters((prev) => prev.map((c) => (c.id === saved.id ? saved : c)));
+      }
+    } catch (err) {
+      console.error('Failed to delete timeline event:', err);
+    }
+  };
+
+  const persistTimelineEvents = async (events) => {
+    if (!selectedChar || !activeStory) return;
+    const updatedChar = { ...selectedChar, timeline_events: events };
+    try {
+      const res = await fetch(`/api/stories/${activeStory.id}/characters`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedChar),
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setSelectedChar(saved);
+        setCharacters((prev) => prev.map((c) => (c.id === saved.id ? saved : c)));
+        return saved;
+      }
+    } catch (err) {
+      console.error('Failed to update timeline event:', err);
+    }
+    return null;
+  };
+
+  const handleShiftTimelineEvent = (idx, dir) => {
+    if (!selectedChar) return;
+    const to = idx + dir;
+    const events = [...(selectedChar.timeline_events || [])];
+    if (to < 0 || to >= events.length) return;
+    [events[idx], events[to]] = [events[to], events[idx]];
+    persistTimelineEvents(events);
+  };
+
+  const handleDragStartTimeline = (e, idx) => {
+    setDragEventIdx(idx);
+    e.dataTransfer.effectAllowed = 'move';
+    try {
+      e.dataTransfer.setData('text/plain', String(idx));
+    } catch (err) {
+      // ignore
+    }
+  };
+
+  const handleDragOverTimeline = (e, idx) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDropTimeline = (e, idx) => {
+    e.preventDefault();
+    if (!selectedChar) return;
+    const from = dragEventIdx;
+    setDragEventIdx(null);
+    if (from === null || from === idx) return;
+    const events = [...(selectedChar.timeline_events || [])];
+    const [moved] = events.splice(from, 1);
+    events.splice(idx, 0, moved);
+    persistTimelineEvents(events);
+  };
+
+  const handleDragEndTimeline = () => {
+    setDragEventIdx(null);
   };
 
   if (!activeStory) {
@@ -553,6 +685,7 @@ export const CharacterRosterView = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in">
+      {entityMention.dropdown}
       {/* Header Banner */}
       <div className="literary-card rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -859,7 +992,9 @@ export const CharacterRosterView = () => {
                           <textarea
                             value={noteDraft}
                             onChange={(e) => setNoteDraft(e.target.value)}
-                            placeholder="Write a note about this character (traits, backstory, quirks...)..."
+                            onInput={entityMention.bind.onInput}
+                            onKeyDown={entityMention.bind.onKeyDown}
+                            placeholder="Write a note about this character (traits, backstory, quirks...). Type @ to reference a character, place, faction, artifact or glossary term."
                             rows={3}
                             autoFocus
                             className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden resize-y"
@@ -904,6 +1039,8 @@ export const CharacterRosterView = () => {
                               <textarea
                                 value={editingNoteDraft}
                                 onChange={(e) => setEditingNoteDraft(e.target.value)}
+                                onInput={entityMention.bind.onInput}
+                                onKeyDown={entityMention.bind.onKeyDown}
                                 rows={3}
                                 autoFocus
                                 className="flex-1 whitespace-pre-wrap rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden resize-y"
@@ -929,7 +1066,7 @@ export const CharacterRosterView = () => {
                           ) : (
                             <>
                               <p className="flex-1 whitespace-pre-wrap text-sm text-[var(--text-muted)] leading-relaxed font-prose">
-                                {note}
+                                <EntityReferenceText text={note} refs={entityRefs} />
                               </p>
                               <div className="mt-0.5 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-all">
                                 <button
@@ -1444,7 +1581,11 @@ export const CharacterRosterView = () => {
                     <span>Chronological Timeline Events</span>
                   </div>
                   <button
-                    onClick={() => setShowEventModal(true)}
+                    onClick={() => {
+                      setEditingEventIdx(null);
+                      setEventForm({ year_or_era: '', title: '', description: '', book_ids: '' });
+                      setShowEventModal(true);
+                    }}
                     className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-[var(--accent-hover)] transition-all cursor-pointer"
                   >
                     <Plus className="h-3.5 w-3.5" />
@@ -1456,26 +1597,71 @@ export const CharacterRosterView = () => {
                 <div className="relative border-l-2 border-[var(--accent)]/30 ml-4 pl-6 space-y-6">
                   {selectedChar.timeline_events && selectedChar.timeline_events.length > 0 ? (
                     selectedChar.timeline_events.map((evt, idx) => (
-                      <div key={idx} className="relative group animate-in fade-in">
+                      <div
+                        key={idx}
+                        draggable
+                        onDragStart={(e) => handleDragStartTimeline(e, idx)}
+                        onDragOver={(e) => handleDragOverTimeline(e, idx)}
+                        onDrop={(e) => handleDropTimeline(e, idx)}
+                        onDragEnd={handleDragEndTimeline}
+                        className={`relative group animate-in fade-in cursor-grab active:cursor-grabbing ${
+                          dragEventIdx === idx ? 'opacity-50' : ''
+                        }`}
+                      >
                         <div className="absolute -left-[31px] top-1 h-4 w-4 rounded-full bg-[var(--accent)] ring-4 ring-[var(--bg-card)] transition-transform group-hover:scale-125" />
 
                         <div className="literary-card rounded-xl p-4 space-y-1 hover:border-[var(--accent)] transition-all">
                           <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold text-[var(--accent)] uppercase tracking-wider font-mono">
-                              {evt.year_or_era}
-                            </span>
-                            {evt.book_ids && evt.book_ids.length > 0 && (
-                              <div className="flex gap-1">
-                                {evt.book_ids.map((b) => (
-                                  <span
-                                    key={b}
-                                    className="rounded-md bg-[var(--accent-light)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--accent)]"
-                                  >
-                                    Book {b}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
+                            <div className="flex items-center gap-2">
+                              <GripVertical className="h-4 w-4 text-[var(--text-dim)] cursor-grab" />
+                              <span className="text-xs font-bold text-[var(--accent)] uppercase tracking-wider font-mono">
+                                {evt.year_or_era}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              {evt.book_ids && evt.book_ids.length > 0 && (
+                                <div className="flex gap-1 mr-2">
+                                  {evt.book_ids.map((b) => (
+                                    <span
+                                      key={b}
+                                      className="rounded-md bg-[var(--accent-light)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--accent)]"
+                                    >
+                                      Book {b}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              <button
+                                onClick={() => handleShiftTimelineEvent(idx, -1)}
+                                disabled={idx === 0}
+                                title="Move up"
+                                className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                              >
+                                <ChevronUp className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleShiftTimelineEvent(idx, 1)}
+                                disabled={idx === (selectedChar.timeline_events || []).length - 1}
+                                title="Move down"
+                                className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                              >
+                                <ChevronDown className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleEditTimelineEvent(idx)}
+                                title="Edit timeline event"
+                                className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] transition-all cursor-pointer"
+                              >
+                                <Edit3 className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteTimelineEvent(idx)}
+                                title="Delete timeline event"
+                                className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-red-500/10 hover:text-red-500 transition-all cursor-pointer"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
                           </div>
                           <h4 className="font-prose text-base font-bold text-[var(--text-main)]">
                             {evt.title}
@@ -1707,10 +1893,10 @@ export const CharacterRosterView = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
           <div className="w-full max-w-md rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] p-6 shadow-2xl space-y-4">
             <h3 className="font-prose text-xl font-bold text-[var(--text-main)]">
-              Add Timeline Event for {selectedChar.name}
+              {editingEventIdx !== null ? `Edit Timeline Event for ${selectedChar.name}` : `Add Timeline Event for ${selectedChar.name}`}
             </h3>
 
-            <form onSubmit={handleAddTimelineEvent} className="space-y-4">
+            <form onSubmit={handleSaveTimelineEvent} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
@@ -1770,7 +1956,11 @@ export const CharacterRosterView = () => {
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowEventModal(false)}
+                  onClick={() => {
+                    setShowEventModal(false);
+                    setEditingEventIdx(null);
+                    setEventForm({ year_or_era: '', title: '', description: '', book_ids: '' });
+                  }}
                   className="rounded-lg px-4 py-2 text-xs font-semibold text-[var(--text-muted)] hover:bg-[var(--bg-hover)]"
                 >
                   Cancel
@@ -1779,7 +1969,7 @@ export const CharacterRosterView = () => {
                   type="submit"
                   className="rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white hover:bg-[var(--accent-hover)]"
                 >
-                  Add Event
+                  {editingEventIdx !== null ? 'Save Event' : 'Add Event'}
                 </button>
               </div>
             </form>

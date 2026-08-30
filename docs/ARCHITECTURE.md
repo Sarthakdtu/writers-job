@@ -56,7 +56,8 @@ Structure builders (call these before writing into a subtree):
 
 Per-feature method groups (all either read `read_json_safe`/`read_text_safe` or write
 `write_*_safe`):
-- **Stories:** `save/get/list/delete_story`. `delete_story` uses `shutil.rmtree`.
+- **Stories:** `save/get/list/delete_story`. `delete_story` soft-deletes by default
+  (flags the story in `story.json`); `hard=True` performs the old `shutil.rmtree`.
 - **Assets:** `save_asset(slug, bytes, filename)` writes into `assets/` with
   `uuid4().hex[:10]` + original suffix; returns `/api/stories/{slug}/assets/{name}`.
   `get_asset_path` locates the file (route serves it via `FileResponse`).
@@ -129,6 +130,17 @@ Per-feature method groups (all either read `read_json_safe`/`read_text_safe` or 
   `saveArtifactData` + `syncArtifactCharacters`), and the appearances matrix
   (`GET .../characters/{id}/appearances`). `editingArtifact=null` is passed to
   `ArtifactFormModal` for the create path.
+- **CharacterMapView:** fetches `GET .../character-map` and renders the returned nodes +
+  weighted edges with `react-force-graph-2d`. Custom `nodeCanvasObject` draws circular
+  avatars (canvas `Image` objects cached on the node as `__img`) + degree-based radius;
+  edge thickness maps to `weight`. Selections (`selectedNodeId`/`selectedEdgeId`,
+  hover ids, `minWeight` filter, `showIsolated`) live in React state, and the graph is
+  redrawn because the inline `nodeCanvasObject`/`linkColor`/`linkWidth` closures are new
+  on each render (kapsule prop setters always invoke `onChange: notifyRedraw`). Clicking
+  an edge opens a fixed right slide-in panel grouping that pair's interactions by
+  book → chapter; `graphRef.current.zoomToFit` fits the view. Theme colors are read from
+  the CSS variables per render and the component is keyed on `theme` to force a clean
+  remount/redraw on theme switch.
 - **BookOutlinerView:** books/chapters/plot/arcs/characters fetched together; four
   sub-tabs (tree/beats/arcs/pov). Book via POST `/books`, chapter via POST `/chapters`,
   plot via POST `/plot`, arcs via POST `/arcs`. Computes POV distribution from chapter
@@ -173,6 +185,27 @@ Given `story_slug` + `char_id`:
      match if `is_pov` **or** `char_id` appears in the `scene_breakdown` string; if so,
      add chapter (with `is_pov`) + book.
 3. Return `CharacterAppearances` with deduped books/chapters/plot_points.
+
+---
+
+## 4.1 Character map algorithm (`get_character_map`)
+
+Derives the whole relationship graph from **plot-beat co-occurrence** in a single pass:
+
+1. Load all characters → seed a `CharacterMapNode` per character (`degree` starts 0).
+2. For each book (in `.order`), for each plot beat:
+   - Keep only `beat.character_ids` that resolve to existing characters; skip beats with
+     fewer than 2.
+   - Optionally resolve `beat.chapter_id → CharacterMapChapter` (book title/id + chapter
+     id/title) via `get_chapter` within the same book.
+   - For every unordered pair `(a, b)` append a `CharacterMapInteraction` to that pair's
+     record (book + beat + optional chapter).
+3. `edges` = one `CharacterMapEdge` per pair: `id = "source--target"`,
+   `weight = len(interactions)`, `interactions` in book/beat order.
+4. `degree` per node = number of distinct edges incident to it.
+
+Nothing is persisted — `GET /api/stories/{id}/character-map` recomputes it live, so the
+map always reflects current beat data. Isolated characters remain as nodes (degree 0).
 
 ---
 

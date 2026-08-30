@@ -1,6 +1,7 @@
 import os
 import shutil
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
@@ -90,27 +91,63 @@ class FileManager:
             return None
         return Story(**data)
 
-    def list_stories(self) -> List[Story]:
-        stories: List[Story] = []
+    def list_dirs(self) -> List[str]:
+        """Returns the sorted list of story directory names under the base data dir."""
         if not self.base_data_dir.exists():
-            return stories
+            return []
+        return sorted(
+            entry.name for entry in self.base_data_dir.iterdir() if entry.is_dir()
+        )
 
-        for entry in self.base_data_dir.iterdir():
-            if entry.is_dir():
-                story = self.sync_story_backgrounds(entry.name) or self.get_story(entry.name)
-                if story:
-                    stories.append(story)
+    def list_stories(self, include_deleted: bool = False) -> List[Story]:
+        stories: List[Story] = []
+        for name in self.list_dirs():
+            story = self.sync_story_backgrounds(name) or self.get_story(name)
+            if not story:
+                continue
+            if story.deleted and not include_deleted:
+                continue
+            stories.append(story)
         return stories
 
-    def delete_story(self, story_slug: str) -> bool:
+    def get_deleted_stories(self) -> List[Story]:
+        """Returns only the soft-deleted stories (for the trash view)."""
+        stories: List[Story] = []
+        for name in self.list_dirs():
+            story = self.get_story(name)
+            if story and story.deleted:
+                stories.append(story)
+        return stories
+
+    def delete_story(self, story_slug: str, hard: bool = False) -> bool:
+        """Soft-deletes (flags) a story by default; physically removes it when hard=True."""
         story_dir = self.get_story_dir(story_slug)
-        if story_dir.exists() and story_dir.is_dir():
+        if not (story_dir.exists() and story_dir.is_dir()):
+            return False
+
+        if hard:
             try:
                 shutil.rmtree(story_dir)
                 return True
             except OSError as e:
                 print(f"[FileManager Error] Failed to delete story dir {story_dir}: {e}")
                 return False
+
+        story = self.get_story(story_slug)
+        if story:
+            story.deleted = True
+            story.deleted_at = datetime.utcnow().isoformat() + "Z"
+            self.save_story(story)
+            return True
+        return False
+
+    def restore_story(self, story_slug: str) -> bool:
+        story = self.get_story(story_slug)
+        if story and story.deleted:
+            story.deleted = False
+            story.deleted_at = None
+            self.save_story(story)
+            return True
         return False
 
     def get_story_fun_facts(self, story_slug: str) -> List[str]:
@@ -285,6 +322,86 @@ class FileManager:
             plot_points=list(found_plot_points.values())
         )
 
+    def get_character_map(self, story_slug: str):
+        """
+        Derives a character-relationship graph from plot beat co-occurrence:
+        every plot beat listing 2+ characters contributes one interaction edge
+        between each pair. Each edge carries its interactions (grouped by the
+        book/chapter the shared beat belongs to) so the frontend can drill into
+        "where" two characters interact.
+        """
+        from app.schemas import (
+            CharacterMap, CharacterMapNode, CharacterMapEdge,
+            CharacterMapInteraction, CharacterMapChapter,
+        )
+
+        characters = self.list_characters(story_slug)
+        node_map = {
+            c.id: CharacterMapNode(id=c.id, name=c.name, image_url=c.image_url or "", role=c.role or "")
+            for c in characters
+        }
+
+        edges_by_pair: Dict[tuple, Dict[str, Any]] = {}
+
+        for book in self.list_books(story_slug):
+            plot = self.get_plot(story_slug, book.id)
+            for beat in plot.beats:
+                char_ids = [cid for cid in beat.character_ids if cid in node_map]
+                if len(char_ids) < 2:
+                    continue
+
+                chapter_ref = None
+                if beat.chapter_id:
+                    ch = self.get_chapter(story_slug, book.id, beat.chapter_id)
+                    if ch:
+                        chapter_ref = CharacterMapChapter(
+                            book_id=book.id, book_title=book.title, id=ch.id, title=ch.title
+                        )
+
+                for i in range(len(char_ids)):
+                    for j in range(i + 1, len(char_ids)):
+                        key = tuple(sorted((char_ids[i], char_ids[j])))
+                        record = edges_by_pair.setdefault(
+                            key, {"source": key[0], "target": key[1], "interactions": []}
+                        )
+                        record["interactions"].append(CharacterMapInteraction(
+                            book_id=book.id,
+                            book_title=book.title,
+                            beat_id=beat.id,
+                            beat_title=beat.title,
+                            beat_description=beat.description or "",
+                            chapter=chapter_ref,
+                        ))
+
+        edges = [
+            CharacterMapEdge(
+                id=f"{rec['source']}--{rec['target']}",
+                source=rec["source"],
+                target=rec["target"],
+                weight=len(rec["interactions"]),
+                interactions=rec["interactions"],
+            )
+            for rec in edges_by_pair.values()
+        ]
+
+        node_degrees = {cid: 0 for cid in node_map}
+        for edge in edges:
+            node_degrees[edge.source] += 1
+            node_degrees[edge.target] += 1
+
+        nodes = [
+            CharacterMapNode(
+                id=node_map[c.id].id,
+                name=node_map[c.id].name,
+                image_url=node_map[c.id].image_url,
+                role=node_map[c.id].role,
+                degree=node_degrees.get(c.id, 0),
+            )
+            for c in characters
+        ]
+
+        return CharacterMap(nodes=nodes, edges=edges)
+
     def list_characters(self, story_slug: str) -> List[Character]:
         chars_dir = self.get_story_dir(story_slug) / "characters"
         characters: List[Character] = []
@@ -407,6 +524,79 @@ class FileManager:
                 ))
 
         return library
+
+    def get_references(self, story_slug: str):
+        """
+        Returns every referenceable entity for the @-mention picker, flattened
+        into a single list where each item carries a `type` so the frontend can
+        group by entity kind. Each item includes a small image (when available)
+        and a short overview for the hover tooltip.
+        """
+        from app.schemas import EntityRefItem
+
+        refs: List[EntityRefItem] = []
+
+        for char in self.list_characters(story_slug):
+            parts = [p for p in [(char.role or "").strip()]
+                     if p]
+            if (char.location or "").strip():
+                parts.append(f"From {char.location.strip()}")
+            refs.append(EntityRefItem(
+                type="character",
+                id=char.id,
+                name=char.name,
+                label=char.name,
+                image_url=char.image_url or "",
+                overview=" · ".join(parts),
+            ))
+
+        for city in self.get_cities(story_slug):
+            overview = (city.atmosphere or city.region or "").strip()
+            refs.append(EntityRefItem(
+                type="city",
+                id=city.id,
+                name=city.name,
+                label=city.name,
+                image_url=city.image_url or "",
+                overview=overview,
+            ))
+
+        for faction in self.get_factions(story_slug):
+            leader = (faction.leader or "").strip()
+            overview = f"Led by {leader}" if leader else (faction.description or "").strip()
+            refs.append(EntityRefItem(
+                type="faction",
+                id=faction.id,
+                name=faction.name,
+                label=faction.name,
+                image_url="",
+                overview=overview,
+            ))
+
+        for artifact in self.get_artifacts(story_slug):
+            overview = (artifact.type or "").strip()
+            if artifact.type and artifact.type.strip():
+                overview = artifact.type.strip()
+            refs.append(EntityRefItem(
+                type="artifact",
+                id=artifact.id,
+                name=artifact.name,
+                label=artifact.name,
+                image_url=artifact.image_url or "",
+                overview=overview,
+            ))
+
+        for term in self.get_glossary(story_slug):
+            refs.append(EntityRefItem(
+                type="glossary",
+                id=term.id,
+                name=term.term,
+                label=term.term,
+                image_url="",
+                overview=(term.definition or "").strip(),
+            ))
+
+        return refs
 
     # --- World Operations ---
 

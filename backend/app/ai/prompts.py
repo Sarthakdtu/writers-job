@@ -169,6 +169,31 @@ TASKS: Dict[str, str] = {
         "worldbuilding gallery (2–4 sentences, evocative but concrete)."
     ),
 
+    # Notion import enrichment (see plans/notion-import-pipeline.md Stage C)
+    "notion_classify": (
+        "Below is a paragraph-by-paragraph draft chapter extracted from a writer's raw "
+        "Notion notes. Classify each paragraph. PROSE means finished or near-finished "
+        "narrative writing. NOTE means outline/planning text (stage directions, story "
+        "ideas, 'show that…', 'describe…', plot notes, meta-commentary).\n\n"
+        "Return strict JSON only:\n"
+        "{\"prose\": [<array of paragraph strings, verbatim>], "
+        "\"notes\": [<array of paragraph strings, verbatim>]}"
+        "\nPreserve paragraphs exactly; do not edit or summarize them."
+    ),
+    "notion_extract": (
+        "From the story text below (prose chapters and outline notes), extract the story's "
+        "core entities so they can populate a worldbuilding database.\n\n"
+        "Return strict JSON only, with these EXACT keys (empty arrays when none):\n"
+        "{\n"
+        "  \"tags\": [short genre/theme tags as strings],\n"
+        "  \"characters\": [{\"name\": str, \"role\": str, \"bio\": str}],\n"
+        "  \"cities\": [{\"name\": str, \"region\": str, \"atmosphere\": str}],\n"
+        "  \"factions\": [{\"name\": str, \"description\": str, \"leader\": str, \"alignment\": str}],\n"
+        "  \"plot_beats\": [{\"title\": str, \"description\": str}]\n"
+        "}\n"
+        "Only include entities that actually appear in the text. Do not invent."
+    ),
+
     # custom skill placeholder (prompt arrives from the stored skill; key is its id)
 }
 
@@ -179,6 +204,8 @@ STAGE_LABELS: Dict[str, str] = {
     "notes_group": "Grouping notes…",
     "art_describe": "Describing the art…",
     "art_polish": "Polishing the caption…",
+    "notion_classify": "Classifying prose vs notes…",
+    "notion_extract": "Extracting characters & worldbuilding…",
 }
 
 ROUTER_SYSTEM = (
@@ -254,6 +281,15 @@ def step_messages(
         return [
             {"role": "system", "content": SYSTEM_PREFIXES["cleanup"]},
             {"role": "user", "content": f"{prev_output}\n\n{TASKS.get(prompt_key, '')}"},
+        ]
+
+    if prompt_key in ("notion_classify", "notion_extract"):
+        task = TASKS.get(prompt_key, "")
+        if prev_output:
+            task = f"{task}\n\nSource text:\n{prev_output}"
+        return [
+            {"role": "system", "content": SYSTEM_PREFIXES["extract"]},
+            {"role": "user", "content": task},
         ]
 
     if prompt_key == "art_polish":

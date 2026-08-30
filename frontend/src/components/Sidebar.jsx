@@ -4,13 +4,15 @@ import {
   LayoutDashboard,
   Globe,
   Users,
+  Network,
   GitFork,
   FileText,
   Quote,
   ChevronLeft,
   ChevronRight,
   BookOpen,
-  Bot
+  Bot,
+  Trash2
 } from 'lucide-react';
 import { useStory } from '../context/StoryContext';
 
@@ -19,10 +21,12 @@ export const NAV_ITEMS = [
   { id: 'dashboard', label: 'Story Dashboard', icon: LayoutDashboard, desc: 'Overview, facts & aesthetics' },
   { id: 'world', label: 'Worldbuilding Hub', icon: Globe, desc: 'Cities, mechanics, factions' },
   { id: 'characters', label: 'Character Roster', icon: Users, desc: 'Profiles & appearances matrix' },
+  { id: 'charmap', label: 'Character Map', icon: Network, desc: 'Relationship graph & interactions' },
   { id: 'outliner', label: 'Book Outliner', icon: GitFork, desc: 'Beats, arcs, scene breakdowns' },
   { id: 'editor', label: 'Draft Editor', icon: FileText, desc: 'Dual-mode Markdown & Google Docs' },
   { id: 'quotes', label: 'Quotes', icon: Quote, desc: 'Memorable lines, notes & tags' },
   { id: 'ai', label: 'Skill Studio', icon: Bot, desc: 'Custom skills & AI pipelines' },
+  { id: 'trash', label: 'Trash', icon: Trash2, desc: 'Soft-deleted stories & restore' },
 ];
 
 export const Sidebar = () => {

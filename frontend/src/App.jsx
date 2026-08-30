@@ -13,10 +13,12 @@ import { HomeView } from './components/modules/HomeView';
 import { DashboardView } from './components/modules/DashboardView';
 import { WorldbuildingView } from './components/modules/WorldbuildingView';
 import { CharacterRosterView } from './components/modules/CharacterRosterView';
+import { CharacterMapView } from './components/modules/CharacterMapView';
 import { BookOutlinerView } from './components/modules/BookOutlinerView';
 import { DraftEditorView } from './components/modules/DraftEditorView';
 import { QuotesView } from './components/modules/QuotesView';
 import { SkillStudioView } from './components/modules/SkillStudioView';
+import { TrashView } from './components/modules/TrashView';
 import { GoogleDriveModal } from './components/GoogleDriveModal';
 
 class AppErrorBoundary extends Component {
@@ -62,6 +64,8 @@ const MainLayout = () => {
         return <WorldbuildingView />;
       case 'characters':
         return <CharacterRosterView />;
+      case 'charmap':
+        return <CharacterMapView />;
       case 'outliner':
         return <BookOutlinerView />;
       case 'editor':
@@ -70,6 +74,8 @@ const MainLayout = () => {
         return <QuotesView />;
       case 'ai':
         return <SkillStudioView />;
+      case 'trash':
+        return <TrashView />;
       default:
         return <HomeView />;
     }

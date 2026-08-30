@@ -124,6 +124,59 @@ export const StoryProvider = ({ children }) => {
     return updateStory(activeStory.id, updatedData);
   };
 
+  const loadDeletedStories = async () => {
+    try {
+      const res = await fetch('/api/stories/deleted');
+      if (res.ok) return await res.json();
+    } catch (err) {
+      console.error('Failed to load deleted stories:', err);
+    }
+    return [];
+  };
+
+  const softDeleteStory = async (storyId) => {
+    try {
+      const res = await fetch(`/api/stories/${storyId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setStories((prev) => prev.filter((s) => s.id !== storyId));
+        if (activeStory?.id === storyId) {
+          const remaining = stories.filter((s) => s.id !== storyId);
+          const next = remaining[0] || null;
+          setActiveStory(next);
+          if (next) localStorage.setItem(ACTIVE_STORY_KEY, next.id);
+          else localStorage.removeItem(ACTIVE_STORY_KEY);
+        }
+        return true;
+      }
+    } catch (err) {
+      console.error('Failed to delete story:', err);
+    }
+    return false;
+  };
+
+  const restoreStory = async (storyId) => {
+    try {
+      const res = await fetch(`/api/stories/${storyId}/restore`, { method: 'POST' });
+      if (res.ok) {
+        await fetchStories();
+        return true;
+      }
+    } catch (err) {
+      console.error('Failed to restore story:', err);
+    }
+    return false;
+  };
+
+  const hardDeleteStory = async (storyId) => {
+    try {
+      const res = await fetch(`/api/stories/${storyId}?hard=true`, { method: 'DELETE' });
+      if (res.ok) return true;
+    } catch (err) {
+      console.error('Failed to permanently delete story:', err);
+    }
+    return false;
+  };
+
   // Collect all unique tags across stories
   const availableTags = ['All', ...new Set(stories.flatMap((s) => s.tags || []))];
 
@@ -137,6 +190,10 @@ export const StoryProvider = ({ children }) => {
         updateStory,
         updateActiveStory,
         fetchStories,
+        loadDeletedStories,
+        softDeleteStory,
+        restoreStory,
+        hardDeleteStory,
         activeTab,
         setActiveTab,
         selectedTag,

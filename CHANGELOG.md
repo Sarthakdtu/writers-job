@@ -3,6 +3,124 @@
 Every time you change functionality, add a dated entry here summarizing what changed and
 update the relevant section(s) in AGENTS.md.
 
+- **2026-08-30 — Soft delete / restore for stories + Trash view.**
+  - Backend: `Story` schema gains `deleted: bool` and `deleted_at: Optional[str]`.
+    `FileManager.delete_story(slug, hard=False)` now **flags** the story (writing
+    `deleted=True, deleted_at=now` into `story.json`) instead of `shutil.rmtree`; data
+    files are kept until a hard delete. New `FileManager.get_deleted_stories()`,
+    `restore_story()`, and `list_dirs()` helpers; `list_stories()` skips `deleted`
+    stories unless `include_deleted=True`.
+  - API: `GET /api/stories/deleted` lists the trash; `DELETE /api/stories/{id}` now soft-
+    deletes and accepts `?hard=true` to permanently remove; new
+    `POST /api/stories/{id}/restore` brings a story back.
+  - Frontend: new `TrashView` registered as `activeTab 'trash'` (+ `NAV_ITEMS`/App switch
+    and a Home header shortcut). Story cards in `HomeView` get a trash button that soft-
+    deletes; `StoryContext` adds `softDeleteStory`, `restoreStory`, `hardDeleteStory`,
+    `loadDeletedStories`. Deleting the active story falls back to another story (or clears
+    the persisted active id).
+
+- **2026-08-30 — Draft Editor: note-style stacked prose blocks.**
+  - Frontend-only change to `DraftEditorView` markdown mode. The single split
+    textarea/live-preview is replaced by **stacked prose blocks** that work exactly like
+    character notes: existing flat `.md` content is split into blocks (`\n\n`-separated)
+    on load; each block renders as a card with a number badge, inline markdown render, and
+    hover actions (move up / move down / edit / delete). An "Add Block" composer appends a
+    new block on top of the stack. Editing opens an inline textarea with explicit
+    "Save Block"/cancel (notes-style, no per-keystroke autosave); saving flattens all
+    blocks back with `\n\n` join and PUTs to the existing `/content` endpoint, so word
+    counts, AI context builders, imports, and the gdocs mode are all untouched.
+  - The quick-formatting toolbar now formats the currently edited block and is disabled
+    until you click Edit on a block.
+  - Perspective Rewrite operates on a single block: if nothing is being edited it
+    auto-selects the last block (whole-block selection), otherwise it uses the live
+    textarea selection of the block being edited; the rewritten result is applied back to
+    that block only.
+
+- **2026-08-30 — Notion export importer (Stages A–D complete).**
+  - Backend: one-off script `backend/scripts/import_notion.py` reads a Notion Markdown export
+    folder (default `~/Downloads/notion_export`), classifies each `.md` as an **index** (list
+    of relative links) vs a **page**, links child chapter-pages to their parent story, and
+    derives chapters from inline `CHAPTER n` markers or nested child-page files.
+  - Mapping: each leaf Notion page → one LoreSmith `Story`; its chapters → one default
+    `Book` ("1"); each chapter → a `Chapter` with prose written via `FileManager`
+    (`save_story` / `save_book` / `save_chapter` / `save_chapter_prose`). When a story has
+    child chapter-pages, the parent body's prose is stored as `Story.overview[]` (links
+    stripped) instead of a chapter. Child chapter ordering prefers a numeric `chapter|ch. N`
+    token in the child title; falls back to title sort.
+  - **Stage C (Ollama enrichment)** — new `backend/app/ai/notion_enrich.py` reuses the
+    existing AI transport (`OllamaClient`, `resolve_model`, `cached_models`, `app.ai.prompts`)
+    rather than a new integration. Two passes per story:
+      1. `classify_chapter` — splits each chapter's paragraphs into `prose` (kept in the
+         chapter `.md`) vs `notes` (planning/outline text, parked into `Story.overview`).
+      2. `extract_entities` — pulls characters / cities / factions / plot beats / tags as
+         structured JSON, persisted via FileManager writers (merge-safe for existing lists).
+    - Pins fast model `qwen2.5:7b` (see AGENTS §4.5 note — the default reasoning model is too
+      slow) with `format="json"` + `options.think=false` for deterministic output.
+    - Robustness: extraction samples a bounded window (~9KB) of the story text and retries up
+      to 3× because small models intermittently emit garbage under `format=json` on large
+      sources (observed echoing story text like "NIGHTCALL").
+  - Prompts: added `notion_classify` + `notion_extract` tasks and stage labels to
+    `app.ai.prompts`; `step_messages` routes both through the `extract` system prefix.
+  - CLI: `--dir`, `--data-dir` (scratch-safe), `--dry-run` (report only, flags `short-seed`
+    pages under 60 words), `--overwrite` (re-run skips existing slugs → idempotent), and
+    `--enrich` (runs Stage C on imported stories, printing per-story entity counts).
+  - BUG-FIX during dev: URL-encoded non-space chars (`%E2%80%94` em-dash in filenames)
+    broke child-page resolution until switching to `urllib.parse.unquote`.
+  - Verified against the real export into a scratch `DATA_DIR`: 16 stories imported; all 16
+    enriched (characters/cities/factions/plot beats/tags/notes extracted); served correctly
+    through the FastAPI backend. Full 16-story enrichment is a one-off batch ~5–7 min with
+    Ollama (per-story ranges ~3s–105s depending on source size and retries).
+
+- **2026-08-30 — Character Map: interactive relationship graph with drill-in bonds.**
+  - Backend: new `GET /api/stories/{id}/character-map` endpoint returning a `CharacterMap`
+    (`nodes` + `edges`). New schemas: `CharacterMapNode` (id, name, image_url, role, degree),
+    `CharacterMapChapter`, `CharacterMapInteraction` (per-shared-beat record with book +
+    optional chapter ref), `CharacterMapEdge` (id `source--target`, weight, interactions),
+    `CharacterMap`.
+  - `FileManager.get_character_map(slug)` derives edges purely from **plot beat
+    co-occurrence**: every beat listing 2+ characters adds one interaction between each
+    pair (grouped by book, carrying the beat's chapter when `beat.chapter_id` resolves).
+    Nodes keep all characters (even isolated ones, `degree` 0); edge `weight` = number of
+    shared beats. Single source of truth for the visual, so no relationship data is stored.
+  - Frontend: new `CharacterMapView` module (`activeTab 'charmap'`, sidebar "Character Map"
+    via `Network` icon). Uses `react-force-graph-2d` (v1.29.1 — new dependency) for a
+    draggable/zoomable force graph. Custom `nodeCanvasObject` draws circular image avatars
+    (with initial-letter fallback) + degree-based radius; edge thickness maps to `weight`.
+    Clicking an **edge** opens a right slide-in panel listing that pair's interactions
+    grouped **book → chapter → beat**, with node/edge hover tooltips, selection
+    highlighting/dimming, "Min shared beats" strength filter, "Hide isolated" toggle, and
+    "Fit view". Theme-aware colors are read dynamically from the CSS variables (fresh
+    closures on re-render trigger the canvas redraw — `nodeCanvasObject` has
+    `onChange: notifyRedraw`).
+  - Registered in `Sidebar.jsx` NAV_ITEMS and the `activeTab` switch in `App.jsx`.
+
+- **2026-08-30 — PWA installable app (desktop-app look).**
+  - Frontend is now a Progressive Web App: added `vite-plugin-pwa` (v1.3.0) to
+    `vite.config.js` with `registerType: 'autoUpdate'`, a full web-app manifest
+    (name **LoreSmith**), `standalone` display (hides browser chrome when installed),
+    and Workbox runtime caching (network-only for `/api/*`, stale-while-revalidate for
+    Google Fonts). `devOptions.enabled: false` — the SW is **not** registered in `npm run
+    dev` (a dev-mode SW was causing service-worker-cached stale HTML/white screens after
+    dev-server restarts); it only applies to the production build.
+  - New static assets in `frontend/public/`: `icon.svg` (linear-gradient purple quill
+    favicon, replaces `/vite.svg`) and `icons/icon-192x192.png`,
+    `icons/icon-512x512.png` (also maskable), `icons/apple-touch-icon.png`
+    (generated from the SVG via `sips`). The plugin generates `manifest.webmanifest`,
+    `sw.js`, and `registerSW.js` at build time (no static `public/manifest.json`).
+  - `frontend/index.html`: swapped favicon to `/icon.svg`, added
+    `apple-touch-icon`, `theme-color` (#6d28d9), `mobile-web-app-capable`,
+    `apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`
+    (black-translucent), `apple-mobile-web-app-title`.
+  - New hook `frontend/src/hooks/usePwaInstallPrompt.js`: captures
+    `beforeinstallprompt`/`appinstalled`, detects `display-mode: standalone`/iOS
+    standalone, exposes `canInstall`/`isInstalled`/`promptInstall`. In `import.meta.env.DEV`
+    the hook also **unregisters any existing service worker + clears caches** so stale
+    dev SWs left over from an older build can never keep serving broken pages.
+  - `Navbar.jsx` gained an "Install / Installed" button (Download / CheckCircle2 icons)
+    wired to the hook. Note: `beforeinstallprompt` only fires on Chrome/Edge over a
+    secure-or-persistent context (localhost is fine); Safari requires manual
+    "Add to Home Screen".
+
 - **2026-08-30 — Search bar in Character Roster.**
   - Frontend: `CharacterRosterView` gained a `searchQuery` state filtering the roster by
     name, role, or location (case-insensitive). A `Search` icon + input was added to both

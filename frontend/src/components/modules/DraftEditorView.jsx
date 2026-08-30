@@ -1,10 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FileText,
-  Eye,
   Cloud,
   Code,
-  Save,
   Check,
   RotateCw,
   Bold,
@@ -16,16 +14,22 @@ import {
   Maximize2,
   ExternalLink,
   BookOpen,
+  ChevronUp,
   ChevronDown,
   Sparkles,
   Replace,
   X,
+  Plus,
+  Edit3,
+  Trash2,
   Loader2,
   UserRound,
   UserRoundCog
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
 import ReactMarkdown from 'react-markdown';
+import { useEntityMention } from './entityRef/EntityMentionPicker';
+import { withEntityReferences } from './entityRef/EntityReference';
 
 const markdownComponents = {
   p: ({ children }) => <p className="my-1">{children}</p>,
@@ -50,8 +54,12 @@ export const DraftEditorView = () => {
   // Mode: 'markdown' | 'gdocs'
   const [editorMode, setEditorMode] = useState('markdown');
 
-  // Prose & Autosave States
-  const [prose, setProse] = useState('');
+  // Prose blocks (note-style, stacked on top of each other) & Autosave States
+  const [blocks, setBlocks] = useState([]);
+  const [editingIdx, setEditingIdx] = useState(null);
+  const [editingDraft, setEditingDraft] = useState('');
+  const [showBlockInput, setShowBlockInput] = useState(false);
+  const [blockDraft, setBlockDraft] = useState('');
   const [saveState, setSaveState] = useState('saved'); // 'saved' | 'unsaved' | 'saving'
   const [wordCount, setWordCount] = useState(0);
 
@@ -69,13 +77,17 @@ export const DraftEditorView = () => {
   const [perspectiveCharId, setPerspectiveCharId] = useState('');
   const [perspectiveSelStart, setPerspectiveSelStart] = useState(0);
   const [perspectiveSelEnd, setPerspectiveSelEnd] = useState(0);
+  const [perspectiveBlockIdx, setPerspectiveBlockIdx] = useState(null);
+  const [perspectiveText, setPerspectiveText] = useState('');
+  const [perspectiveAutoStart, setPerspectiveAutoStart] = useState(false);
   const [perspectiveJob, setPerspectiveJob] = useState(null);
   const [perspectiveResult, setPerspectiveResult] = useState('');
   const [perspectiveError, setPerspectiveError] = useState('');
   const [perspectiveLoading, setPerspectiveLoading] = useState(false);
 
-  // Debounce save timer ref
-  const saveTimeoutRef = useRef(null);
+  // Entity references (@-mention picker + hover previews)
+  const [entityRefs, setEntityRefs] = useState([]);
+  const entityMention = useEntityMention(entityRefs);
 
   // Fetch books
   useEffect(() => {
@@ -111,7 +123,11 @@ export const DraftEditorView = () => {
           } else {
             setSelectedChId('');
             setCurrentChapter(null);
-            setProse('');
+            setBlocks([]);
+            setShowBlockInput(false);
+            setBlockDraft('');
+            setEditingIdx(null);
+            setEditingDraft('');
           }
         }
       } catch (err) {
@@ -135,14 +151,18 @@ export const DraftEditorView = () => {
           setGoogleDocId(chData.google_doc_id || '');
         }
 
-        // Prose Markdown
+        // Prose Markdown -> split into stacked blocks
         const proseRes = await fetch(`/api/stories/${activeStory.id}/books/${selectedBookId}/chapters/${selectedChId}/content`);
         if (proseRes.ok) {
           const data = await proseRes.json();
-          setProse(data.content || '');
-          const words = (data.content || '').trim().split(/\s+/).filter(Boolean).length;
-          setWordCount(words);
+          const derived = deriveBlocks(data.content || '');
+          setBlocks(derived);
+          setWordCount(wordsInBlocks(derived));
           setSaveState('saved');
+          setShowBlockInput(false);
+          setBlockDraft('');
+          setEditingIdx(null);
+          setEditingDraft('');
         }
       } catch (err) {
         console.error('Failed to load chapter prose:', err);
@@ -167,6 +187,25 @@ export const DraftEditorView = () => {
       }
     };
     fetchChars();
+  }, [activeStory]);
+
+  // Fetch entity references for the @-mention picker / hover previews
+  useEffect(() => {
+    if (!activeStory) return;
+    let cancelled = false;
+    const fetchRefs = async () => {
+      try {
+        const res = await fetch(`/api/stories/${activeStory.id}/references`);
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled) setEntityRefs(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch entity references:', err);
+      }
+    };
+    fetchRefs();
+    return () => { cancelled = true; };
   }, [activeStory]);
 
   // Poll perspective-rewrite job until done
@@ -201,21 +240,25 @@ export const DraftEditorView = () => {
     return () => clearInterval(id);
   }, [activeStory, perspectiveJob?.id]);
 
-  // Debounced Autosave Effect (1000ms delay)
-  const handleProseChange = (e) => {
-    const newContent = e.target.value;
-    setProse(newContent);
-    const words = newContent.trim().split(/\s+/).filter(Boolean).length;
-    setWordCount(words);
-    setSaveState('unsaved');
-
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
+  // When auto-starting a block for perspective rewrite, select the whole block in the textarea.
+  useEffect(() => {
+    if (!showPerspectiveModal || !perspectiveAutoStart || editingIdx == null) return;
+    const textarea = document.getElementById(`block-textarea-${editingIdx}`);
+    if (textarea) {
+      textarea.focus();
+      textarea.setSelectionRange(perspectiveSelStart, perspectiveSelEnd);
     }
+  }, [showPerspectiveModal, perspectiveAutoStart, editingIdx, perspectiveSelStart, perspectiveSelEnd]);
 
-    saveTimeoutRef.current = setTimeout(() => {
-      saveProseToBackend(newContent);
-    }, 1000);
+  // --- Prose block helpers (note-style, stacked) ---
+  const flattenBlocks = (bls) => bls.map((b) => (b || '').trim()).filter(Boolean).join('\n\n');
+
+  const wordsInBlocks = (bls) => flattenBlocks(bls).trim().split(/\s+/).filter(Boolean).length;
+
+  const deriveBlocks = (content) => {
+    const text = (content || '').trim();
+    if (!text) return [];
+    return text.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
   };
 
   const saveProseToBackend = async (contentToSave) => {
@@ -238,6 +281,49 @@ export const DraftEditorView = () => {
     }
   };
 
+  const commitBlocks = (bls) => {
+    setBlocks(bls);
+    setWordCount(wordsInBlocks(bls));
+    saveProseToBackend(flattenBlocks(bls));
+  };
+
+  const handleAddBlock = () => {
+    if (!blockDraft.trim()) return;
+    commitBlocks([...blocks, blockDraft.trim()]);
+    setBlockDraft('');
+    setShowBlockInput(false);
+  };
+
+  const startEditBlock = (idx, text) => {
+    setEditingIdx(idx);
+    setEditingDraft(text);
+  };
+
+  const cancelEditBlock = () => {
+    setEditingIdx(null);
+    setEditingDraft('');
+  };
+
+  const handleUpdateBlock = () => {
+    if (editingIdx == null || !editingDraft.trim()) return;
+    commitBlocks(blocks.map((b, i) => (i === editingIdx ? editingDraft.trim() : b)));
+    cancelEditBlock();
+  };
+
+  const handleDeleteBlock = (idx) => {
+    const next = blocks.filter((_, i) => i !== idx);
+    if (editingIdx === idx) cancelEditBlock();
+    commitBlocks(next);
+  };
+
+  const moveBlock = (idx, dir) => {
+    const target = idx + dir;
+    if (target < 0 || target >= blocks.length) return;
+    const next = [...blocks];
+    [next[idx], next[target]] = [next[target], next[idx]];
+    commitBlocks(next);
+  };
+
   // Attach/Update Google Doc ID
   const handleSaveGoogleDocId = async () => {
     if (!activeStory || !selectedBookId || !selectedChId || !currentChapter) return;
@@ -257,26 +343,38 @@ export const DraftEditorView = () => {
     }
   };
 
-  // Helper formatting inserters
+  // Helper formatting inserters (apply to the currently edited block)
   const insertFormatting = (prefix, suffix = '') => {
-    const textarea = document.getElementById('markdown-editor-textarea');
+    if (editingIdx == null) return;
+    const textarea = document.getElementById(`block-textarea-${editingIdx}`);
     if (!textarea) return;
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
-    const selectedText = prose.substring(start, end);
+    const selectedText = editingDraft.substring(start, end);
     const replacement = prefix + selectedText + suffix;
-    const newProse = prose.substring(0, start) + replacement + prose.substring(end);
-    setProse(newProse);
-    saveProseToBackend(newProse);
+    const nextDraft = editingDraft.substring(0, start) + replacement + editingDraft.substring(end);
+    setEditingDraft(nextDraft);
   };
 
-  // --- Perspective Rewrite handlers ---
+  // --- Perspective Rewrite handlers (operate on a single prose block) ---
   const openPerspectiveModal = () => {
-    const textarea = document.getElementById('markdown-editor-textarea');
+    let idx = editingIdx;
+    let autoStart = false;
+    if (idx == null && blocks.length > 0) {
+      idx = blocks.length - 1;
+      autoStart = true;
+      startEditBlock(idx, blocks[idx]);
+    }
+    if (idx == null) return;
+    const currentText = autoStart ? blocks[idx] : editingDraft;
+    const textarea = document.getElementById(`block-textarea-${idx}`);
     const start = textarea ? textarea.selectionStart : 0;
-    const end = textarea ? textarea.selectionEnd : 0;
-    setPerspectiveSelStart(start);
-    setPerspectiveSelEnd(end);
+    const end = textarea ? textarea.selectionEnd : autoStart ? currentText.length : 0;
+    setPerspectiveBlockIdx(idx);
+    setPerspectiveText(currentText);
+    setPerspectiveSelStart(autoStart ? 0 : start);
+    setPerspectiveSelEnd(autoStart ? currentText.length : end);
+    setPerspectiveAutoStart(autoStart);
     setPerspectiveKind('character');
     setPerspectiveCharId(characters[0]?.id || '');
     setPerspectiveJob(null);
@@ -285,7 +383,7 @@ export const DraftEditorView = () => {
     setShowPerspectiveModal(true);
   };
 
-  const selectedProse = () => prose.substring(perspectiveSelStart, perspectiveSelEnd).trim();
+  const selectedProse = () => (perspectiveText || '').substring(perspectiveSelStart, perspectiveSelEnd).trim();
 
   const resetPerspectiveModal = () => {
     setPerspectiveLoading(false);
@@ -341,24 +439,28 @@ export const DraftEditorView = () => {
   };
 
   const applyPerspectiveResult = (mode) => {
-    if (!perspectiveResult) return;
+    if (!perspectiveResult || perspectiveBlockIdx == null) return;
+    const blockText = perspectiveText || blocks[perspectiveBlockIdx] || '';
     const start = perspectiveSelStart;
     const end = perspectiveSelEnd;
-    let newProse;
+    let newBlock;
     if (mode === 'replace') {
       // Replace the selected passage with the rewrite
-      newProse = prose.substring(0, start) + perspectiveResult + prose.substring(end);
+      newBlock = blockText.substring(0, start) + perspectiveResult + blockText.substring(end);
     } else {
       // Insert the rewrite at the selection start, keeping the original passage
-      newProse = prose.substring(0, start) + perspectiveResult + prose.substring(start);
+      newBlock = blockText.substring(0, start) + perspectiveResult + blockText.substring(start);
     }
-    setProse(newProse);
-    const words = newProse.trim().split(/\s+/).filter(Boolean).length;
-    setWordCount(words);
+    const next = blocks.map((b, i) => (i === perspectiveBlockIdx ? newBlock : b));
     setShowPerspectiveModal(false);
     setPerspectiveResult('');
-    saveProseToBackend(newProse);
+    cancelEditBlock();
+    commitBlocks(next);
   };
+
+  const renderMarkdown = (text) => (
+    <ReactMarkdown components={withEntityReferences(markdownComponents, entityRefs)}>{text}</ReactMarkdown>
+  );
 
   if (!activeStory) {
     return (
@@ -370,6 +472,7 @@ export const DraftEditorView = () => {
 
   return (
     <div className="space-y-6 animate-in fade-in">
+      {entityMention.dropdown}
       {/* Top Controls Header & Chapter Selectors */}
       <div className="literary-card rounded-2xl p-4 md:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
         {/* Book & Chapter Selectors */}
@@ -450,9 +553,7 @@ export const DraftEditorView = () => {
           </button>
           {showBreakdown && (
             <div className="border-t border-[var(--border-subtle)] pt-2 text-xs text-[var(--text-muted)] font-prose leading-relaxed max-h-48 overflow-y-auto">
-              <ReactMarkdown components={markdownComponents}>
-                {currentChapter.scene_breakdown}
-              </ReactMarkdown>
+              {renderMarkdown(currentChapter.scene_breakdown)}
             </div>
           )}
         </div>
@@ -504,43 +605,49 @@ export const DraftEditorView = () => {
           <div className="flex items-center gap-1 border-b border-[var(--border-subtle)] pb-2 overflow-x-auto">
             <button
               onClick={() => insertFormatting('**', '**')}
-              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"
-              title="Bold (**text**)"
+              disabled={editingIdx == null}
+              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] disabled:opacity-40 disabled:cursor-not-allowed"
+              title={editingIdx == null ? 'Click Edit on a block first to format it (Bold **text**)' : 'Bold (**text**)'}
             >
               <Bold className="h-4 w-4" />
             </button>
             <button
               onClick={() => insertFormatting('*', '*')}
-              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"
-              title="Italic (*text*)"
+              disabled={editingIdx == null}
+              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] disabled:opacity-40 disabled:cursor-not-allowed"
+              title={editingIdx == null ? 'Click Edit on a block first to format it (Italic *text*)' : 'Italic (*text*)'}
             >
               <Italic className="h-4 w-4" />
             </button>
             <button
               onClick={() => insertFormatting('# ')}
-              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"
-              title="Heading 1 (# Heading)"
+              disabled={editingIdx == null}
+              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] disabled:opacity-40 disabled:cursor-not-allowed"
+              title={editingIdx == null ? 'Click Edit on a block first (Heading 1 # Heading)' : 'Heading 1 (# Heading)'}
             >
               <Heading1 className="h-4 w-4" />
             </button>
             <button
               onClick={() => insertFormatting('## ')}
-              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"
-              title="Heading 2 (## Heading)"
+              disabled={editingIdx == null}
+              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] disabled:opacity-40 disabled:cursor-not-allowed"
+              title={editingIdx == null ? 'Click Edit on a block first (Heading 2 ## Heading)' : 'Heading 2 (## Heading)'}
             >
               <Heading2 className="h-4 w-4" />
             </button>
             <button
               onClick={() => insertFormatting('> ')}
-              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"
-              title="Blockquote (> Quote)"
+              disabled={editingIdx == null}
+              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] disabled:opacity-40 disabled:cursor-not-allowed"
+              title={editingIdx == null ? 'Click Edit on a block first (Blockquote > Quote)' : 'Blockquote (> Quote)'}
             >
               <Quote className="h-4 w-4" />
             </button>
             <button
               onClick={() => insertFormatting('- ')}
-              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"
-              title="List (- Bullet)"
+              disabled={editingIdx == null}
+              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] disabled:opacity-40 disabled:cursor-not-allowed"
+              title={editingIdx == null ? 'Click Edit on a block first (List - Bullet)' : 'List (- Bullet)'}
             >
               <List className="h-4 w-4" />
             </button>
@@ -557,35 +664,193 @@ export const DraftEditorView = () => {
             </button>
           </div>
 
-          {/* Split View Container: Markdown Editor Textarea & Live Preview */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 min-h-[500px]">
-            {/* Editor Input Area */}
-            <div className="flex flex-col">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-[var(--accent)] mb-1">
-                Markdown Editor (Prose Source)
-              </label>
-              <textarea
-                id="markdown-editor-textarea"
-                value={prose}
-                onChange={handleProseChange}
-                placeholder="Begin writing your scene prose here in Markdown..."
-                className="flex-1 w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-base)] p-4 font-prose text-base leading-relaxed text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden resize-none"
-              />
-            </div>
+          {/* Stacked Prose Blocks (note-style: added on top of each other) */}
+          <div className="space-y-3">
+            {blocks.length === 0 && !showBlockInput && (
+              <div className="rounded-xl border border-dashed border-[var(--border-color)] p-10 text-center space-y-3">
+                <BookOpen className="h-8 w-8 text-[var(--accent)] mx-auto opacity-50" />
+                <p className="text-xs text-[var(--text-muted)] max-w-sm mx-auto">
+                  No prose blocks yet. Click 'Add Block' to begin — each block stacks on top of the last to form your chapter.
+                </p>
+                <button
+                  onClick={() => setShowBlockInput(true)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-[var(--accent-hover)] transition-all"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add Block
+                </button>
+              </div>
+            )}
 
-            {/* Live Preview Area */}
-            <div className="flex flex-col">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-dim)] mb-1 flex items-center gap-1">
-                <Eye className="h-3 w-3" /> Live Render Preview
-              </label>
-              <div className="flex-1 w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-4 font-prose text-base leading-relaxed text-[var(--text-main)] overflow-y-auto whitespace-pre-wrap">
-                {prose ? (
-                  prose
-                ) : (
-                  <span className="text-xs italic text-[var(--text-dim)]">Live render preview will display formatted prose here...</span>
+            {blocks.length > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-dim)]">
+                  Prose Blocks ({blocks.length}) — stacked in order
+                </span>
+                {!showBlockInput && (
+                  <button
+                    onClick={() => setShowBlockInput(true)}
+                    className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-[var(--accent-hover)] transition-all"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add Block
+                  </button>
                 )}
               </div>
-            </div>
+            )}
+
+            {showBlockInput && (
+              <div className="space-y-2 rounded-xl border border-[var(--accent)]/40 bg-[var(--accent-light)]/40 p-3 animate-in fade-in zoom-in-95">
+                <textarea
+                  value={blockDraft}
+                  onChange={(e) => setBlockDraft(e.target.value)}
+                  onInput={entityMention.bind.onInput}
+                  onKeyDown={entityMention.bind.onKeyDown}
+                  placeholder="Write a new prose block (a paragraph, scene beat, or chapter section)... Type @ to reference a character, place, faction, artifact or glossary term."
+                  rows={4}
+                  autoFocus
+                  className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden resize-y font-prose leading-relaxed"
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBlockDraft('');
+                      setShowBlockInput(false);
+                    }}
+                    className="rounded-lg px-3 py-1.5 text-xs font-semibold text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAddBlock}
+                    disabled={!blockDraft.trim()}
+                    className="flex items-center gap-1 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-[var(--accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add Block
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {blocks.map((block, idx) => {
+              const isEditing = editingIdx === idx;
+              return (
+                <div key={idx} className="group rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)]">
+                  {isEditing ? (
+                    <div className="space-y-2 p-3">
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--accent)]">
+                          <Edit3 className="h-3 w-3" />
+                          Editing Block {idx + 1}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => moveBlock(idx, -1)}
+                            disabled={idx === 0}
+                            className="rounded-md p-1 text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] disabled:opacity-30"
+                            title="Move block up"
+                          >
+                            <ChevronUp className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => moveBlock(idx, 1)}
+                            disabled={idx === blocks.length - 1}
+                            className="rounded-md p-1 text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] disabled:opacity-30"
+                            title="Move block down"
+                          >
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                      <textarea
+                        id={`block-textarea-${idx}`}
+                        value={editingDraft}
+                        onChange={(e) => {
+                          setEditingDraft(e.target.value);
+                          setWordCount(wordsInBlocks(blocks.map((b, i) => (i === idx ? e.target.value : b))));
+                        }}
+                        onInput={entityMention.bind.onInput}
+                        onKeyDown={entityMention.bind.onKeyDown}
+                        rows={Math.max(4, editingDraft.split('\n').length)}
+                        autoFocus
+                        className="w-full whitespace-pre-wrap rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-2 font-prose text-[15px] leading-relaxed text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden resize-y"
+                      />
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-[var(--text-dim)]">
+                          {editingDraft.trim() ? `${editingDraft.trim().split(/\s+/).filter(Boolean).length} words` : 'Empty block'}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={handleUpdateBlock}
+                            disabled={!editingDraft.trim()}
+                            className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-[var(--accent)] hover:bg-[var(--accent-light)] disabled:opacity-40 disabled:cursor-not-allowed"
+                            title="Save block"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                            Save Block
+                          </button>
+                          <button
+                            onClick={cancelEditBlock}
+                            className="rounded-md p-1.5 text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500"
+                            title="Cancel edit"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-start gap-3 p-3">
+                      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[var(--accent)]/10 text-[10px] font-bold text-[var(--accent)]">
+                        {idx + 1}
+                      </span>
+                      <div className="flex-1 min-w-0 font-prose text-[15px] leading-relaxed text-[var(--text-muted)]">
+                        {block.trim() ? (
+                          renderMarkdown(block)
+                        ) : (
+                          <span className="text-xs italic text-[var(--text-dim)]">Empty block</span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                        <button
+                          onClick={() => moveBlock(idx, -1)}
+                          disabled={idx === 0}
+                          className="rounded-md p-1 text-[var(--text-dim)] hover:bg-[var(--accent-light)] hover:text-[var(--accent)] disabled:opacity-30 disabled:cursor-not-allowed"
+                          title="Move block up"
+                        >
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => moveBlock(idx, 1)}
+                          disabled={idx === blocks.length - 1}
+                          className="rounded-md p-1 text-[var(--text-dim)] hover:bg-[var(--accent-light)] hover:text-[var(--accent)] disabled:opacity-30 disabled:cursor-not-allowed"
+                          title="Move block down"
+                        >
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => startEditBlock(idx, block)}
+                          className="rounded-md p-1 text-[var(--text-dim)] hover:bg-[var(--accent-light)] hover:text-[var(--accent)]"
+                          title="Edit block"
+                        >
+                          <Edit3 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteBlock(idx)}
+                          className="rounded-md p-1 text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500"
+                          title="Delete block"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
