@@ -1428,7 +1428,7 @@ export const CharacterRosterView = () => {
                                 </div>
                                 {a.properties && (
                                   <p className="text-xs text-[var(--text-muted)] leading-relaxed line-clamp-2">
-                                    {a.properties}
+                                    <EntityReferenceText text={a.properties} refs={entityRefs} />
                                   </p>
                                 )}
                                 <div className="flex flex-wrap gap-1">

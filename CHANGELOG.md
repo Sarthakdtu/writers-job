@@ -3,6 +3,40 @@
 Every time you change functionality, add a dated entry here summarizing what changed and
 update the relevant section(s) in AGENTS.md.
 
+- **2026-08-30 — Entity references (@-mention picker + rich hover previews).**
+  - **Concept:** a writer can type `@` in prose/notes, pick an entity **type** (Characters,
+    Cities/Locations, Factions, Artifacts/Relics, Glossary), then pick the specific entity to
+    insert a compact inline reference token, stored in the raw Markdown as
+    `[[type:id|label]]` (e.g. `[[character:alex|Alex Stone]]`). When rendered, references show
+    **bold** and on **hover** reveal a small card with the entity's image (when available) +
+    a short overview blurb.
+  - Backend: new `EntityRefItem` schema (`type`, `id`, `name`, `label`, `image_url`,
+    `overview`). New `FileManager.get_references(slug)` returns **all** referenceable entities
+    flattened with a `type` field (characters, cities, factions, artifacts, glossary), gathered
+    from live data. New route `GET /api/stories/{id}/references` → `List[EntityRefItem]`.
+  - Frontend shared pieces (new `frontend/src/components/modules/entityRef/` folder):
+    - `entityRef.js` — utilities: `ENTITY_TYPES`, `parseRefTokens` (regex parsing of
+      `[[type:id|label]]`), `buildRefToken`, `insertRefToken`, `groupRefsByType`, labels/icons.
+    - `EntityReference.jsx` — `EntityReference` (bold + CSS-hover tooltip using lucide type
+      icon or the entity's image), `EntityReferenceText` (render a plain-string note with any
+      tokens turned into references, for non-markdown surfaces), and
+      `withEntityReferences(mdComponents, refs)` — wraps a `react-markdown` components object
+      with a custom `text` component so `[[...]]` tokens render as references inside Markdown.
+    - `EntityMentionPicker.jsx` — `useEntityMention(refs)` hook returning `{ bind, dropdown }`.
+      `bind` (`onInput`/`onKeyDown`) attaches to a `<textarea>`/`<input>`; it detects `@`,
+      records caret position via a mirror element, and shows a **type → entity** two-step
+      `createPortal` dropdown near the caret with keyboard nav (↑/↓, Enter, Esc) and a live
+      query filter. `applyEntity` replaces the `@query` with the token and dispatches an
+      `input` event so the parent's `onChange` picks it up (no new save route needed).
+  - Integrated surfaces: Draft Editor prose blocks + Add Block composer (reference rendering
+    via `withEntityReferences` in `renderMarkdown`), Character notes (Add/Edit note + rich
+    rendering via `EntityReferenceText`), Worldbuilding description fields (city key
+    locations, faction description, glossary definition + rich card rendering), and the shared
+    `ArtifactFormModal` (artifact properties + timeline descriptions, self-fetches refs).
+  - **Storage/compat note:** references are pure text tokens in Markdown, so AI context
+    builders, imports, word counts, gdocs mode, and backups all work unchanged. Rendering is
+    purely additive via the custom `text` component / `EntityReferenceText`.
+
 - **2026-08-30 — Soft delete / restore for stories + Trash view.**
   - Backend: `Story` schema gains `deleted: bool` and `deleted_at: Optional[str]`.
     `FileManager.delete_story(slug, hard=False)` now **flags** the story (writing

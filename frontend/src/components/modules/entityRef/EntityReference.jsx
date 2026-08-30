@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { Children, useMemo } from 'react';
 import { User, MapPin, Flag, Sparkles, BookMarked } from 'lucide-react';
 import { parseRefTokens } from './entityRef';
 
@@ -77,13 +77,67 @@ export function EntityReference({ token, refs }) {
   );
 }
 
-// Wraps the shared markdown components so plain-text `[[type:id|label]]` tokens
-// are rendered as bold, hoverable role references.
+// Blocks that can hold inline text; their children get rewritten so
+// `[[type:id|label]]` text nodes render as references. react-markdown v9+
+// dropped support for a `text` component, so we intercept here instead.
+const TEXT_BEARING_BLOCKS = [
+  'p',
+  'li',
+  'blockquote',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'td',
+  'th',
+  'dt',
+  'dd',
+  'caption',
+  'summary',
+];
+
+// Walk the React element tree produced by react-markdown and replace any plain
+// text containing `[[...]]` tokens with bold, hoverable reference spans.
+function transformChildren(children, refs) {
+  return Children.map(children, (child) => {
+    if (typeof child === 'string') {
+      const str = child;
+      const tokens = parseRefTokens(str);
+      if (tokens.length === 0) return str;
+      const out = [];
+      let last = 0;
+      tokens.forEach((t, i) => {
+        if (t.start > last) out.push(str.slice(last, t.start));
+        out.push(<EntityReference key={`${i}-${t.type}-${t.id}`} token={t} refs={refs} />);
+        last = t.end;
+      });
+      if (last < str.length) out.push(str.slice(last));
+      return out;
+    }
+    if (React.isValidElement(child)) {
+      const inner = child.props.children;
+      if (inner == null) return child;
+      return React.cloneElement(child, { children: transformChildren(inner, refs) });
+    }
+    return child;
+  });
+}
+
+// Wraps a `react-markdown` components object so `[[type:id|label]]` tokens in
+// Markdown text are rendered as bold, hoverable role references.
 export function withEntityReferences(mdComponents, refs) {
-  return {
-    ...mdComponents,
-    text: (props) => <EntityText {...props} refs={refs} />,
-  };
+  const next = { ...mdComponents };
+  for (const tag of TEXT_BEARING_BLOCKS) {
+    const Base = next[tag];
+    next[tag] = (props) => {
+      const children = transformChildren(props.children, refs);
+      if (Base) return <Base {...props}>{children}</Base>;
+      return React.createElement(tag, { ...props, children });
+    };
+  }
+  return next;
 }
 
 function EntityText({ children, refs }) {

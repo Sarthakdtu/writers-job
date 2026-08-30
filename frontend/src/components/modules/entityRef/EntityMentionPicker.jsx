@@ -87,13 +87,19 @@ export function useEntityMention(refs) {
     const before = target.value.slice(0, st.atIndex);
     const after = target.value.slice(target.selectionStart);
     const token = buildRefToken(entity);
-    target.value = before + token + after;
+    const next = before + token + after;
+    // Use the native value setter (not `target.value =`) so React's internal
+    // value tracker stays in sync. Otherwise the controlled onChange may be
+    // skipped or the edit wiped on the next re-render from `close()`.
+    const proto = target instanceof HTMLTextAreaElement
+      ? window.HTMLTextAreaElement.prototype
+      : window.HTMLInputElement.prototype;
+    const valueSetter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+    valueSetter.call(target, next);
+    target.dispatchEvent(new Event('input', { bubbles: true }));
     target.focus();
     const newPos = (before + token).length;
     target.setSelectionRange(newPos, newPos);
-    try {
-      target.dispatchEvent(new Event('input', { bubbles: true }));
-    } catch (_) { /* legacy fallback */ }
     close();
   }, [close]);
 

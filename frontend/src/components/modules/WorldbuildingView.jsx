@@ -24,6 +24,8 @@ import {
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
 import { ArtifactFormModal } from '../ArtifactFormModal';
+import { useEntityMention } from './entityRef/EntityMentionPicker';
+import { EntityReferenceText } from './entityRef/EntityReference';
 
 export const WorldbuildingView = () => {
   const { activeStory } = useStory();
@@ -45,6 +47,10 @@ export const WorldbuildingView = () => {
   // Gallery search + unified image library (gallery items + character images)
   const [gallerySearch, setGallerySearch] = useState('');
   const [library, setLibrary] = useState([]);
+
+  // Entity references (@-mention picker + rich rendering in descriptions)
+  const [entityRefs, setEntityRefs] = useState([]);
+  const entityMention = useEntityMention(entityRefs);
 
   // Form states for items
   const [cityForm, setCityForm] = useState({ id: '', name: '', region: '', atmosphere: '', image_url: '', key_locations: '' });
@@ -136,6 +142,24 @@ export const WorldbuildingView = () => {
       }
     };
     fetchCharacters();
+  }, [activeStory, activeSection]);
+
+  useEffect(() => {
+    if (!activeStory) return;
+    let cancelled = false;
+    const fetchRefs = async () => {
+      try {
+        const res = await fetch(`/api/stories/${activeStory.id}/references`);
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled) setEntityRefs(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch entity references:', err);
+      }
+    };
+    fetchRefs();
+    return () => { cancelled = true; };
   }, [activeStory, activeSection]);
 
   // Resolve belongs_to character ids to their names/objects
@@ -354,6 +378,7 @@ export const WorldbuildingView = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in">
+      {entityMention.dropdown}
       {/* Header */}
       <div className="literary-card rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -591,7 +616,7 @@ export const WorldbuildingView = () => {
                   </div>
 
                   <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-                    {fac.description}
+                    <EntityReferenceText text={fac.description} refs={entityRefs} />
                   </p>
 
                   {fac.leader && (
@@ -664,7 +689,7 @@ export const WorldbuildingView = () => {
 
                     {art.properties && (
                       <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-                        {art.properties}
+                        <EntityReferenceText text={art.properties} refs={entityRefs} />
                       </p>
                     )}
 
@@ -769,7 +794,7 @@ export const WorldbuildingView = () => {
                       </button>
                     </div>
                     <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-                      {item.definition}
+                      <EntityReferenceText text={item.definition} refs={entityRefs} />
                     </p>
                   </div>
                 ))}
@@ -955,6 +980,8 @@ export const WorldbuildingView = () => {
                     rows={3}
                     value={cityForm.key_locations}
                     onChange={(e) => setCityForm({ ...cityForm, key_locations: e.target.value })}
+                    onInput={entityMention.bind.onInput}
+                    onKeyDown={entityMention.bind.onKeyDown}
                     placeholder="Grand Library&#10;Clockwork Tower"
                     className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
                   />
@@ -1108,7 +1135,9 @@ export const WorldbuildingView = () => {
                     rows={4}
                     value={factionForm.description}
                     onChange={(e) => setFactionForm({ ...factionForm, description: e.target.value })}
-                    placeholder="Guarding the ancient runes and controlling trade..."
+                    onInput={entityMention.bind.onInput}
+                    onKeyDown={entityMention.bind.onKeyDown}
+                    placeholder="Guarding the ancient runes and controlling trade... Type @ to reference a character, place, faction, artifact or glossary term."
                     className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
                   />
                 </div>
@@ -1169,6 +1198,8 @@ export const WorldbuildingView = () => {
                     required
                     value={glossaryForm.definition}
                     onChange={(e) => setGlossaryForm({ ...glossaryForm, definition: e.target.value })}
+                    onInput={entityMention.bind.onInput}
+                    onKeyDown={entityMention.bind.onKeyDown}
                     placeholder="The art of extracting energy from ambient planar rifts..."
                     className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
                   />

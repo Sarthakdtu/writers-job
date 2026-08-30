@@ -101,9 +101,15 @@ writer_job/
 │               ├── BookOutlinerView.jsx     ← Book/chapter tree, plot beats, arcs, POV tracker
 │               ├── QuotesView.jsx           ← Standalone quotes (text + note + tags) tab
 │               ├── DraftEditorView.jsx      ← Markdown + Google Docs dual mode, autosave
-│               └── SkillStudioView.jsx      ← Skill Studio (activeTab 'ai'): custom skill CRUD,
+│               ├── SkillStudioView.jsx      ← Skill Studio (activeTab 'ai'): custom skill CRUD,
 │                                              router preview + editable/lockable source chips,
 │                                              test-run with inline result (react-markdown, no prose plugin)
+│               └── entityRef/               ← Shared `@`-entity-reference feature
+│                   ├── entityRef.js             ← token parsing/building helpers ([[type:id|label]])
+│                   ├── EntityReference.jsx      ← bold + hover tooltip renderer; withEntityReferences
+│                   │                              (wraps react-markdown `text`); EntityReferenceText
+│                   └── EntityMentionPicker.jsx  ← useEntityMention hook: `@` type→entity dropdown
+│                                                  (portal near caret, keyboard nav) + insert token
 ├── data/
 │   └── stories/
 │       └── <story-slug>/     ← Per-story data (see §4). Git-ignored.
@@ -148,6 +154,9 @@ All request/response bodies are typed with Pydantic v2 models. The core entities
 - **`StoryImageItem`** — unified image-library entry for the gallery tab:
   `source` (`"gallery"|"city"|"character"`), `id`, `title`, `image_url`, `context`, `category`,
   `tags[]`, `character_id`, `character_name`.
+- **`EntityRefItem`** — one referenceable entity for the `@`-mention picker / hover previews:
+  `type` (`"character"|"city"|"faction"|"artifact"|"glossary"`), `id`, `name`, `label`,
+  `image_url`, `overview` (short blurb for the tooltip).
 - **`Book`** — `id`, `title`, `order`, `target_word_count`, `plot_subsections[]`
   (`PlotSubsection`: `title`, `description`), `google_doc_url`.
 - **`Chapter`** — `id`, `title`, `pov_character_id`, `scene_breakdown`,
@@ -234,6 +243,10 @@ arcs, chapters/prose). Key behaviors to maintain:
 - `get_image_library(story_id)` builds the unified tagged library returned by
   `GET /api/stories/{id}/images/library` (gallery items + city images + character
   portraits/gallery).
+- `get_references(story_id)` returns **all** referenceable entities (characters, cities,
+  factions, artifacts, glossary) as a flat `List[EntityRefItem]` (each with its `type`
+  field), for the `@`-mention picker + hover previews. Served by
+  `GET /api/stories/{id}/references`.
 - `get_story_dir(slug)` = `base_data_dir / slug` (`base_data_dir` defaults to
   `DATA_DIR` env or `data/stories`).
 - `get_book_dir(slug, book_id)` = `.../books/book-<book_id>`.
@@ -275,6 +288,9 @@ REST endpoints in `main.py`. The frontend calls these via the Vite dev proxy. Su
   of `Quote`). Standalone, independent of characters; tagged with book/chapter/character.
 - **Image library:** `GET /api/stories/{id}/images/library` → unified tagged image library
   (gallery items + city/location images + character images) for the searchable gallery tab.
+- **References:** `GET /api/stories/{id}/references` → `List[EntityRefItem]` (flat list of
+  all referenceable entities, each with a `type`), used by the `@`-mention picker + hover
+  previews in the prose/notes editors.
 - **Fun facts:** `GET /api/stories/{id}/fun-facts` → `List[str]` of randomizable summary facts
   (counts/spotlights for characters, factions, cities, artifacts, glossary, books, chapters,
   word count, world mechanics). Used by the dashboard's "Summary · Fun Fact" shuffle card.
@@ -423,6 +439,14 @@ to reuse:
 - **Plot & arcs are saved via `POST .../plot` and `POST .../arcs`** (upsert, full array).
 - **Appearances matrix** loads via
   `GET .../characters/{char_id}/appearances` → `{ books, chapters, plot_points }`.
+- **Entity references:** fetch `GET /api/stories/{id}/references` → `List[EntityRefItem]`
+  (flat, each with `type`). Attach `useEntityMention(refs).bind` (`onInput`/`onKeyDown`) to a
+  prose/notes `<textarea>`/`<input>` and render `useEntityMention(refs).dropdown` once per
+  view to get the `@` type→entity picker; inserting stores `[[type:id|label]]` in the text.
+  To render references, wrap the `react-markdown` components with
+  `withEntityReferences(components, refs)` (Markdown surfaces) or use
+  `EntityReferenceText text={...} refs={refs}` (plain-text notes). References are plain text
+  tokens, so AI context builders, imports, word counts, gdocs mode and backups are unaffected.
 
 ---
 

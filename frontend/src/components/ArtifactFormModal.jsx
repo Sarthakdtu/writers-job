@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Upload, Link as LinkIcon, Plus, Users, BookOpen, Trash2 } from 'lucide-react';
+import { useEntityMention } from './modules/entityRef/EntityMentionPicker';
 
 export const ArtifactFormModal = ({
   storyId,
@@ -30,6 +31,28 @@ export const ArtifactFormModal = ({
     initialArtifact?.image_url?.startsWith('/api/stories/') ? 'upload' : 'url'
   );
   const [uploading, setUploading] = useState(false);
+
+  // Entity references (@-mention picker in description fields)
+  const [entityRefs, setEntityRefs] = useState([]);
+  const entityMention = useEntityMention(entityRefs);
+
+  useEffect(() => {
+    if (!storyId) return;
+    let cancelled = false;
+    const fetchRefs = async () => {
+      try {
+        const res = await fetch(`/api/stories/${storyId}/references`);
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled) setEntityRefs(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch entity references:', err);
+      }
+    };
+    fetchRefs();
+    return () => { cancelled = true; };
+  }, [storyId]);
 
   const toggleBelongs = (charId) => {
     setForm((f) => {
@@ -118,6 +141,7 @@ export const ArtifactFormModal = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
+      {entityMention.dropdown}
       <div className="w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] p-6 shadow-2xl space-y-4">
         <div className="flex items-start justify-between">
           <div>
@@ -268,7 +292,9 @@ export const ArtifactFormModal = ({
                 type="text"
                 value={form.properties}
                 onChange={(e) => setForm({ ...form, properties: e.target.value })}
-                placeholder="Absorbs heat and unleashes searing flames"
+                onInput={entityMention.bind.onInput}
+                onKeyDown={entityMention.bind.onKeyDown}
+                placeholder="Absorbs heat and unleashes searing flames. Type @ to reference an entity."
                 className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
               />
             </div>
@@ -362,7 +388,9 @@ export const ArtifactFormModal = ({
                         rows={2}
                         value={evt.description}
                         onChange={(e) => updateTimelineEvent(idx, 'description', e.target.value)}
-                        placeholder="What happened to the artifact during this event?"
+                        onInput={entityMention.bind.onInput}
+                        onKeyDown={entityMention.bind.onKeyDown}
+                        placeholder="What happened to the artifact during this event? Type @ to reference an entity."
                         className="flex-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] px-2.5 py-1.5 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
                       />
                       <button

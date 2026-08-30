@@ -49,7 +49,7 @@ export const BookOutlinerView = () => {
 
   const [bookForm, setBookForm] = useState({ id: '', title: '', order: 1, target_word_count: 50000 });
   const [chapterForm, setChapterForm] = useState({ id: '', title: '', pov_character_id: '' });
-  const [beatForm, setBeatForm] = useState({ id: '', title: '', description: '', chapter_id: '', character_ids: '' });
+  const [beatForm, setBeatForm] = useState({ id: '', title: '', description: '', chapter_id: '', character_ids: [] });
   const [arcForm, setArcForm] = useState({ character_id: '', arc_summary: '', starting_state: '', ending_state: '', key_milestones: '' });
 
   const [editingSceneId, setEditingSceneId] = useState(null);
@@ -201,7 +201,9 @@ export const BookOutlinerView = () => {
   const handleSaveBeat = async (e) => {
     e.preventDefault();
     if (!activeStory || !selectedBook || !beatForm.title.trim()) return;
-    const charIds = beatForm.character_ids.split(',').map((c) => c.trim()).filter(Boolean);
+    const charIds = Array.isArray(beatForm.character_ids)
+      ? beatForm.character_ids.filter(Boolean)
+      : beatForm.character_ids.split(',').map((c) => c.trim()).filter(Boolean);
     const newBeat = {
       id: beatForm.id || `beat-${Date.now()}`,
       title: beatForm.title,
@@ -544,7 +546,7 @@ export const BookOutlinerView = () => {
                 </h3>
                 <button
                   onClick={() => {
-                    setBeatForm({ id: '', title: '', description: '', chapter_id: '', character_ids: '' });
+                    setBeatForm({ id: '', title: '', description: '', chapter_id: '', character_ids: [] });
                     setShowBeatModal(true);
                   }}
                   className="flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-3.5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-[var(--accent-hover)]"
@@ -558,19 +560,53 @@ export const BookOutlinerView = () => {
                 {plot.beats && plot.beats.length > 0 ? (
                   plot.beats.map((beat) => (
                     <div key={beat.id} className="literary-card rounded-xl p-5 space-y-2 relative">
-                      <div className="flex items-center justify-between">
-                        <h4 className="font-prose text-base font-bold text-[var(--text-main)]">
-                          {beat.title}
-                        </h4>
-                        {beat.chapter_id && (
-                          <span className="rounded-md bg-[var(--accent-light)] px-2 py-0.5 text-[10px] font-mono font-bold text-[var(--accent)]">
-                            Chapter {beat.chapter_id}
-                          </span>
-                        )}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h4 className="font-prose text-base font-bold text-[var(--text-main)]">
+                            {beat.title}
+                          </h4>
+                          {beat.chapter_id && (
+                            <span className="rounded-md bg-[var(--accent-light)] px-2 py-0.5 text-[10px] font-mono font-bold text-[var(--accent)]">
+                              Chapter {beat.chapter_id}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => {
+                            setBeatForm({
+                              id: beat.id,
+                              title: beat.title,
+                              description: beat.description || '',
+                              chapter_id: beat.chapter_id || '',
+                              character_ids: beat.character_ids || [],
+                            });
+                            setShowBeatModal(true);
+                          }}
+                          className="p-1.5 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] transition-colors cursor-pointer"
+                          title="Edit beat"
+                        >
+                          <Edit3 className="h-4 w-4" />
+                        </button>
                       </div>
                       <p className="text-xs text-[var(--text-muted)] leading-relaxed">
                         {beat.description}
                       </p>
+                      {beat.character_ids && beat.character_ids.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                          {beat.character_ids.map((cid) => {
+                            const c = characters.find((x) => x.id === cid);
+                            return (
+                              <span
+                                key={cid}
+                                className="inline-flex items-center gap-1 rounded-full bg-[var(--accent-light)] px-2 py-0.5 text-[10px] font-bold text-[var(--accent)] border border-[var(--border-subtle)]"
+                              >
+                                <Users className="h-3 w-3" />
+                                {c ? c.name : cid}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   ))
                 ) : (
@@ -607,18 +643,36 @@ export const BookOutlinerView = () => {
                     const charObj = characters.find((c) => c.id === arc.character_id);
                     return (
                       <div key={idx} className="literary-card rounded-2xl p-5 space-y-3">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-full bg-[var(--accent-light)] text-[var(--accent)] font-bold font-prose text-lg flex items-center justify-center border border-[var(--border-subtle)]">
-                            {charObj ? charObj.name.charAt(0) : '?'}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-3">
+                            <div className="h-10 w-10 rounded-full bg-[var(--accent-light)] text-[var(--accent)] font-bold font-prose text-lg flex items-center justify-center border border-[var(--border-subtle)]">
+                              {charObj ? charObj.name.charAt(0) : '?'}
+                            </div>
+                            <div>
+                              <h4 className="font-prose text-base font-bold text-[var(--text-main)]">
+                                {charObj ? charObj.name : arc.character_id}
+                              </h4>
+                              <span className="text-[10px] font-semibold text-[var(--accent)]">
+                                Character Arc
+                              </span>
+                            </div>
                           </div>
-                          <div>
-                            <h4 className="font-prose text-base font-bold text-[var(--text-main)]">
-                              {charObj ? charObj.name : arc.character_id}
-                            </h4>
-                            <span className="text-[10px] font-semibold text-[var(--accent)]">
-                              Arc Arc Summary
-                            </span>
-                          </div>
+                          <button
+                            onClick={() => {
+                              setArcForm({
+                                character_id: arc.character_id,
+                                arc_summary: arc.arc_summary || '',
+                                starting_state: arc.starting_state || '',
+                                ending_state: arc.ending_state || '',
+                                key_milestones: (arc.key_milestones || []).join('\n'),
+                              });
+                              setShowArcModal(true);
+                            }}
+                            className="p-1.5 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] transition-colors cursor-pointer"
+                            title="Edit arc"
+                          >
+                            <Edit3 className="h-4 w-4" />
+                          </button>
                         </div>
 
                         <p className="text-xs text-[var(--text-muted)] italic">
@@ -819,6 +873,213 @@ export const BookOutlinerView = () => {
                   className="rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white hover:bg-[var(--accent-hover)]"
                 >
                   Save Chapter
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Plot Beat Modal */}
+      {showBeatModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] p-6 shadow-2xl space-y-4">
+            <h3 className="font-prose text-xl font-bold text-[var(--text-main)]">
+              {beatForm.id ? 'Edit Plot Beat' : 'Add Plot Beat'}
+            </h3>
+            <form onSubmit={handleSaveBeat} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                  Beat Title
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={beatForm.title}
+                  onChange={(e) => setBeatForm({ ...beatForm, title: e.target.value })}
+                  placeholder="e.g. Inciting Incident: The Letter"
+                  className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-main)] focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                  Description
+                </label>
+                <textarea
+                  rows={3}
+                  value={beatForm.description}
+                  onChange={(e) => setBeatForm({ ...beatForm, description: e.target.value })}
+                  placeholder="Describe the beat..."
+                  className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                  Chapter (optional)
+                </label>
+                <select
+                  value={beatForm.chapter_id}
+                  onChange={(e) => setBeatForm({ ...beatForm, chapter_id: e.target.value })}
+                  className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:outline-hidden"
+                >
+                  <option value="">-- No Chapter --</option>
+                  {chapters.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                  Characters in this beat (choose 2+ to create a bond)
+                </label>
+                <div className="max-h-40 overflow-y-auto space-y-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] p-2">
+                  {characters.length === 0 && (
+                    <p className="text-[10px] text-[var(--text-dim)] italic px-1 py-2">
+                      No characters yet — add some to the roster first.
+                    </p>
+                  )}
+                  {characters.map((c) => (
+                    <label
+                      key={c.id}
+                      className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs text-[var(--text-main)] hover:bg-[var(--bg-hover)]"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={(beatForm.character_ids || []).includes(c.id)}
+                        onChange={(e) => {
+                          const ids = beatForm.character_ids || [];
+                          setBeatForm({
+                            ...beatForm,
+                            character_ids: e.target.checked
+                              ? [...ids, c.id]
+                              : ids.filter((id) => id !== c.id),
+                          });
+                        }}
+                        className="h-3.5 w-3.5 accent-[var(--accent)]"
+                      />
+                      <span className="font-semibold">{c.name}</span>
+                      {c.role && <span className="text-[10px] text-[var(--text-muted)]">({c.role})</span>}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowBeatModal(false)}
+                  className="rounded-lg px-4 py-2 text-xs font-semibold text-[var(--text-muted)] hover:bg-[var(--bg-hover)]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white hover:bg-[var(--accent-hover)]"
+                >
+                  Save Beat
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Character Arc Modal */}
+      {showArcModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] p-6 shadow-2xl space-y-4">
+            <h3 className="font-prose text-xl font-bold text-[var(--text-main)]">
+              Add Character Arc
+            </h3>
+            <form onSubmit={handleSaveArc} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                  Character
+                </label>
+                <select
+                  required
+                  value={arcForm.character_id}
+                  onChange={(e) => setArcForm({ ...arcForm, character_id: e.target.value })}
+                  className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:outline-hidden"
+                >
+                  <option value="">-- Select Character --</option>
+                  {characters.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                  Arc Summary
+                </label>
+                <textarea
+                  rows={3}
+                  value={arcForm.arc_summary}
+                  onChange={(e) => setArcForm({ ...arcForm, arc_summary: e.target.value })}
+                  placeholder="Summarize the character's arc in this book..."
+                  className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:outline-hidden"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                    Starting State
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={arcForm.starting_state}
+                    onChange={(e) => setArcForm({ ...arcForm, starting_state: e.target.value })}
+                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                    Ending State
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={arcForm.ending_state}
+                    onChange={(e) => setArcForm({ ...arcForm, ending_state: e.target.value })}
+                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                  Key Milestones (one per line)
+                </label>
+                <textarea
+                  rows={3}
+                  value={arcForm.key_milestones}
+                  onChange={(e) => setArcForm({ ...arcForm, key_milestones: e.target.value })}
+                  placeholder="Realizes the truth about her mentor&#10;Chooses to spare her brother"
+                  className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:outline-hidden"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowArcModal(false)}
+                  className="rounded-lg px-4 py-2 text-xs font-semibold text-[var(--text-muted)] hover:bg-[var(--bg-hover)]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white hover:bg-[var(--accent-hover)]"
+                >
+                  Save Arc
                 </button>
               </div>
             </form>

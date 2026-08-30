@@ -63,7 +63,7 @@ const CharBubble = ({ char, sizeClass = 'h-9 w-9' }) => (
 );
 
 export const CharacterMapView = () => {
-  const { activeStory, setActiveTab } = useStory();
+  const { activeStory, setActiveTab, focusMode } = useStory();
   const { theme } = useTheme();
 
   const [mapData, setMapData] = useState({ nodes: [], edges: [] });
@@ -556,7 +556,9 @@ export const CharacterMapView = () => {
 
       {/* Slide-in Interaction Panel */}
       <div
-        className={`fixed top-0 right-0 z-50 h-full w-[400px] max-w-[92vw] border-l border-[var(--border-color)] bg-[var(--bg-panel)]/95 shadow-2xl backdrop-blur-md transition-transform duration-300 ease-out ${
+        className={`fixed right-0 z-50 w-[400px] max-w-[92vw] border-l border-[var(--border-color)] bg-[var(--bg-panel)]/95 shadow-2xl backdrop-blur-md transition-transform duration-300 ease-out ${
+          focusMode ? 'top-0 h-full' : 'top-14 h-[calc(100vh-3.5rem)]'
+        } ${
           panelOpen ? 'translate-x-0' : 'translate-x-full'
         } ${panelOpen ? '' : 'pointer-events-none'}`}
         aria-hidden={!panelOpen}
@@ -570,14 +572,14 @@ export const CharacterMapView = () => {
                 <span>Character Bond</span>
               </div>
               <div className="mt-3 flex items-center gap-2">
-                <CharBubble char={nodesById[selectedEdge.source]} sizeClass="h-10 w-10" />
+                <CharBubble char={nodesById[graphId(selectedEdge.source)]} sizeClass="h-10 w-10" />
                 <span className="font-prose text-lg font-bold text-[var(--text-main)]">
-                  {nodesById[selectedEdge.source]?.name || selectedEdge.source}
+                  {nodesById[graphId(selectedEdge.source)]?.name || graphId(selectedEdge.source)}
                 </span>
                 <span className="text-xs text-[var(--text-dim)]">↔</span>
-                <CharBubble char={nodesById[selectedEdge.target]} sizeClass="h-10 w-10" />
+                <CharBubble char={nodesById[graphId(selectedEdge.target)]} sizeClass="h-10 w-10" />
                 <span className="font-prose text-lg font-bold text-[var(--text-main)]">
-                  {nodesById[selectedEdge.target]?.name || selectedEdge.target}
+                  {nodesById[graphId(selectedEdge.target)]?.name || graphId(selectedEdge.target)}
                 </span>
               </div>
               <div className="mt-2 flex items-center gap-2">
