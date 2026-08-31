@@ -163,6 +163,16 @@ export const DraftEditorView = () => {
           setBlockDraft('');
           setEditingIdx(null);
           setEditingDraft('');
+
+          // Publish current chapter context so the global Explorer can rank
+          // character notes by relevance to what's being written.
+          window.dispatchEvent(new CustomEvent('loresmith:editor-context', {
+            detail: {
+              title: chData?.title || '',
+              sceneBreakdown: chData?.scene_breakdown || '',
+              prose: flattenBlocks(derived),
+            },
+          }));
         }
       } catch (err) {
         console.error('Failed to load chapter prose:', err);
@@ -738,7 +748,7 @@ export const DraftEditorView = () => {
             {blocks.map((block, idx) => {
               const isEditing = editingIdx === idx;
               return (
-                <div key={idx} className="group rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)]">
+                <div key={idx} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)]">
                   {isEditing ? (
                     <div className="space-y-2 p-3">
                       <div className="flex items-center justify-between">
@@ -814,11 +824,11 @@ export const DraftEditorView = () => {
                           <span className="text-xs italic text-[var(--text-dim)]">Empty block</span>
                         )}
                       </div>
-                      <div className="mt-0.5 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                      <div className="mt-0.5 flex flex-col gap-0.5">
                         <button
                           onClick={() => moveBlock(idx, -1)}
                           disabled={idx === 0}
-                          className="rounded-md p-1 text-[var(--text-dim)] hover:bg-[var(--accent-light)] hover:text-[var(--accent)] disabled:opacity-30 disabled:cursor-not-allowed"
+                          className="rounded-md p-1 text-[var(--text-dim)] opacity-0 hover:opacity-100 transition-all hover:bg-[var(--accent-light)] hover:text-[var(--accent)] disabled:opacity-30 disabled:cursor-not-allowed"
                           title="Move block up"
                         >
                           <ChevronUp className="h-3.5 w-3.5" />
@@ -826,21 +836,21 @@ export const DraftEditorView = () => {
                         <button
                           onClick={() => moveBlock(idx, 1)}
                           disabled={idx === blocks.length - 1}
-                          className="rounded-md p-1 text-[var(--text-dim)] hover:bg-[var(--accent-light)] hover:text-[var(--accent)] disabled:opacity-30 disabled:cursor-not-allowed"
+                          className="rounded-md p-1 text-[var(--text-dim)] opacity-0 hover:opacity-100 transition-all hover:bg-[var(--accent-light)] hover:text-[var(--accent)] disabled:opacity-30 disabled:cursor-not-allowed"
                           title="Move block down"
                         >
                           <ChevronDown className="h-3.5 w-3.5" />
                         </button>
                         <button
                           onClick={() => startEditBlock(idx, block)}
-                          className="rounded-md p-1 text-[var(--text-dim)] hover:bg-[var(--accent-light)] hover:text-[var(--accent)]"
+                          className="rounded-md p-1 text-[var(--text-dim)] opacity-0 hover:opacity-100 transition-all hover:bg-[var(--accent-light)] hover:text-[var(--accent)]"
                           title="Edit block"
                         >
                           <Edit3 className="h-3.5 w-3.5" />
                         </button>
                         <button
                           onClick={() => handleDeleteBlock(idx)}
-                          className="rounded-md p-1 text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500"
+                          className="rounded-md p-1 text-[var(--text-dim)] opacity-0 hover:opacity-100 transition-all hover:bg-red-500/10 hover:text-red-500"
                           title="Delete block"
                         >
                           <Trash2 className="h-3.5 w-3.5" />

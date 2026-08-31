@@ -12,10 +12,12 @@ import {
   Users,
   FileText,
   Sparkles,
-  Check
+  Check,
+  Loader2,
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 const markdownComponents = {
   p: ({ children }) => <p className="my-1">{children}</p>,
@@ -28,6 +30,17 @@ const markdownComponents = {
   strong: ({ children }) => <strong className="font-bold text-[var(--text-main)]">{children}</strong>,
   em: ({ children }) => <em className="italic">{children}</em>,
 };
+
+const defaultJudgePrompt =
+  'Act as a fiction editor. Judge whether the plot progresses well across these chapters ' +
+  'and how interconnected they are. Assess narrative flow and cause-and-effect momentum ' +
+  'between consecutive chapters, whether setups planted earlier in the range pay off, ' +
+  'whether threads, characters, and stakes carry through or stall, and whether pacing ' +
+  'escalates or sags across the range. Cite specific chapters. For each, note a strength ' +
+  'and a concrete risk or fix.\n\n' +
+  'Output structure:\n' +
+  '## Range verdict\n## Flow & momentum (chapter by chapter)\n## Setups → payoffs\n' +
+  '## Threads & character continuity\n## Pacing curve\n## Risks & suggestions';
 
 export const BookOutlinerView = () => {
   const { activeStory } = useStory();
@@ -55,6 +68,99 @@ export const BookOutlinerView = () => {
   const [editingSceneId, setEditingSceneId] = useState(null);
   const [editingSceneText, setEditingSceneText] = useState('');
   const [savingSceneId, setSavingSceneId] = useState(null);
+
+  // Chapter Judge (sub-tab 5)
+  const [judgeStart, setJudgeStart] = useState('');
+  const [judgeEnd, setJudgeEnd] = useState('');
+  const [judgePrompt, setJudgePrompt] = useState(defaultJudgePrompt);
+  const [judgePromptDirty, setJudgePromptDirty] = useState(false);
+  const [judgeJob, setJudgeJob] = useState(null);
+  const [judgeResult, setJudgeResult] = useState(null);
+  const [judgeError, setJudgeError] = useState('');
+  const [judgeRunning, setJudgeRunning] = useState(false);
+
+  const orderedChapters = [...chapters].sort((a, b) => {
+    const n = (id) => parseInt((id || '').replace(/\D/g, ''), 10) || 0;
+    return n(a.id) - n(b.id);
+  });
+
+  const resetJudgePrompt = () => {
+    setJudgePrompt(defaultJudgePrompt);
+    setJudgePromptDirty(false);
+  };
+
+  useEffect(() => {
+    if (chapters.length > 0) {
+      const ordered = [...chapters].sort((a, b) => {
+        const n = (id) => parseInt((id || '').replace(/\D/g, ''), 10) || 0;
+        return n(a.id) - n(b.id);
+      });
+      if (!ordered.some((c) => c.id === judgeStart)) setJudgeStart(ordered[0].id);
+      if (!ordered.some((c) => c.id === judgeEnd)) setJudgeEnd(ordered[ordered.length - 1].id);
+    }
+  }, [chapters]);
+
+  const runJudge = async () => {
+    if (!activeStory || !selectedBook || !judgeStart || !judgeEnd) return;
+    setJudgeRunning(true);
+    setJudgeError('');
+    setJudgeResult(null);
+    try {
+      const res = await fetch('/api/ai/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          story_id: activeStory.id,
+          skill: 'chapter_interconnect',
+          input: {
+            text: judgePrompt,
+            params: { book_id: selectedBook.id, chapter_id: judgeStart, chapter_end: judgeEnd },
+          },
+        }),
+      });
+      if (res.ok) {
+        const job = await res.json();
+        setJudgeJob(job);
+        pollJudge(job.id);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setJudgeError(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail || err));
+        setJudgeRunning(false);
+      }
+    } catch (err) {
+      console.error('Failed to run chapter judge:', err);
+      setJudgeError('Could not reach the AI backend.');
+      setJudgeRunning(false);
+    }
+  };
+
+  const pollJudge = async (jobId, depth = 0) => {
+    if (!activeStory) return;
+    if (depth > 300) { setJudgeRunning(false); return; }
+    try {
+      const res = await fetch(`/api/ai/jobs/${activeStory.id}/${jobId}`);
+      if (res.ok) {
+        const job = await res.json();
+        setJudgeJob(job);
+        if (job.status === 'done') {
+          const rres = await fetch(`/api/ai/results/${activeStory.id}/chapter_interconnect`);
+          if (rres.ok) setJudgeResult(await rres.json());
+          setJudgeRunning(false);
+          return;
+        }
+        if (job.status === 'error') {
+          setJudgeError(job.error_message || 'The judge returned an error.');
+          setJudgeRunning(false);
+          return;
+        }
+        if (job.status === 'cancelled') { setJudgeRunning(false); return; }
+      }
+      setTimeout(() => pollJudge(jobId, depth + 1), 2000);
+    } catch (err) {
+      setTimeout(() => pollJudge(jobId, depth + 1), 2000);
+    }
+  };
+
 
   const fetchBooks = async () => {
     if (!activeStory) return;
@@ -395,6 +501,16 @@ export const BookOutlinerView = () => {
                 }`}
               >
                 4. POV Tracker
+              </button>
+              <button
+                onClick={() => setSubTab('judge')}
+                className={`rounded-xl px-3.5 py-2 text-xs font-semibold transition-all ${
+                  subTab === 'judge'
+                    ? 'bg-[var(--accent-light)] text-[var(--accent)] border border-[var(--accent)]'
+                    : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]'
+                }`}
+              >
+                5. Chapter Judge
               </button>
             </div>
           </div>
@@ -743,6 +859,133 @@ export const BookOutlinerView = () => {
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {/* SUBTAB 5: CHAPTER JUDGE */}
+          {subTab === 'judge' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-prose text-xl font-bold text-[var(--text-main)]">
+                  Chapter Interconnectedness Judge
+                </h3>
+                <span className="text-[11px] text-[var(--text-dim)]">Analyzes prose + plot beats + characters for chapters x → y</span>
+              </div>
+
+              {orderedChapters.length === 0 ? (
+                <div className="p-8 literary-card rounded-2xl text-center text-xs text-[var(--text-muted)]">
+                  Add chapters to this book before judging interconnectedness.
+                </div>
+              ) : (
+                <>
+                  {/* Range + run */}
+                  <div className="literary-card rounded-2xl p-5 space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">
+                          From chapter
+                        </label>
+                        <select
+                          value={judgeStart}
+                          onChange={(e) => setJudgeStart(e.target.value)}
+                          className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-main)] focus:outline-hidden"
+                        >
+                          {orderedChapters.map((ch, i) => (
+                            <option key={ch.id} value={ch.id}>
+                              Ch {i + 1} — {ch.title}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">
+                          To chapter
+                        </label>
+                        <select
+                          value={judgeEnd}
+                          onChange={(e) => setJudgeEnd(e.target.value)}
+                          className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-main)] focus:outline-hidden"
+                        >
+                          {orderedChapters.map((ch, i) => (
+                            <option key={ch.id} value={ch.id}>
+                              Ch {i + 1} — {ch.title}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-semibold text-[var(--text-muted)]">
+                          Judging prompt
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-[var(--text-dim)]">
+                            {judgePromptDirty ? 'edited' : 'base prompt'}
+                          </span>
+                          <button
+                            onClick={resetJudgePrompt}
+                            disabled={!judgePromptDirty}
+                            className="text-[11px] text-[var(--accent)] hover:underline disabled:opacity-40 disabled:no-underline"
+                          >
+                            Reset to base
+                          </button>
+                        </div>
+                      </div>
+                      <textarea
+                        value={judgePrompt}
+                        onChange={(e) => { setJudgePrompt(e.target.value); setJudgePromptDirty(true); }}
+                        rows={7}
+                        placeholder="Write the criteria the LLM judge should evaluate…"
+                        className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-[13px] leading-relaxed text-[var(--text-main)] focus:outline-hidden font-prose"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={runJudge}
+                        disabled={judgeRunning}
+                        className="flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-[var(--accent-hover)] transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {judgeRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                        {judgeRunning ? 'Judging…' : 'Run judge'}
+                      </button>
+                      {judgeJob && !judgeRunning && judgeJob.status === 'running' && (
+                        <span className="text-xs text-[var(--text-muted)]">Running…</span>
+                      )}
+                      {judgeJob && judgeJob.status === 'pending' && (
+                        <span className="text-xs text-amber-400">Queued…</span>
+                      )}
+                      {judgeError && (
+                        <span className="text-xs text-rose-400 bg-rose-400/10 rounded-lg px-2 py-1">{judgeError}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Result */}
+                  {judgeResult && (
+                    <div className="literary-card rounded-2xl p-5 space-y-2 animate-in fade-in">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] uppercase tracking-wider text-[var(--text-dim)]">Judge result</span>
+                        <span className="font-mono text-[10px] text-[var(--text-dim)]">{judgeResult.created_at}</span>
+                      </div>
+                      <div className="space-y-1 max-h-[60vh] overflow-y-auto pr-1">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                          {judgeResult.content}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
+                  )}
+
+                  {!judgeRunning && !judgeResult && (
+                    <div className="p-6 literary-card rounded-2xl text-center text-[11px] text-[var(--text-dim)]">
+                      Pick the chapter range above and run the judge to assess plot progression
+                      and interconnectedness using your prompt.
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
         </div>

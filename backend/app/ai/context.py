@@ -496,6 +496,7 @@ def build_context(
         },
         "show_tell": lambda: _chapter_context(fm, story, params),
         "perspective_rewrite": lambda: _perspective_context(fm, story, params),
+        "chapter_interconnect": lambda: _chapter_range_context(fm, story, params),
     }
     fn = builders.get(pipeline_id)
     if fn is None:
@@ -576,6 +577,97 @@ def _continue_context(fm, story, params) -> Dict[str, Any]:
         "next_beat": {"title": beat.title, "description": cap_text(beat.description, 1500)} if beat else None,
         "pov": ch["chapter"].pov_character_id,
         "style_cues": cap_text(ch["chapter"].scene_breakdown or "", 1500),
+    }
+
+
+def _chapter_range_context(fm, story, params) -> Dict[str, Any]:
+    """Context for the chapter-interconnectedness judge (Book Outliner "Judge" tab).
+
+    Selects the ordered chapters from `chapter_id` (start) to `chapter_end` (end,
+    defaulting to the start when omitted) within `book_id`, and gathers:
+      - each chapter's title / index / POV / scene breakdown and a bounded prose slice,
+      - the plot beats whose `chapter_id` falls inside the range,
+      - the characters who serve as POV or appear in the range (from beats + scene
+        breakdowns), so the judge sees who threads through.
+    """
+    book_id = (params or {}).get("book_id")
+    start = (params or {}).get("chapter_id")
+    if not start:
+        return {"error": "Missing selection: choose a start chapter."}
+    book = fm.get_book(story.id, book_id) if book_id else None
+    if book is None:
+        for b in fm.list_books(story.id):
+            if b.order == 1 or not book:
+                book = b
+        if book is None:
+            return {"error": "No book found for the range."}
+
+    def _num(ch_id: str):
+        m = __import__("re").findall(r"\d+", ch_id or "")
+        return int("".join(m)) if m else 0
+
+    ordered = sorted(fm.list_chapters(story.id, book.id), key=lambda c: _num(c.id))
+    if not ordered:
+        return {"error": "This book has no chapters yet."}
+
+    start_idx = None
+    for i, c in enumerate(ordered):
+        if c.id == start:
+            start_idx = i
+            break
+    if start_idx is None:
+        start_idx = 0
+    end_idx = len(ordered) - 1
+    end_ch = (params or {}).get("chapter_end")
+    if end_ch:
+        for i, c in enumerate(ordered):
+            if c.id == end_ch:
+                end_idx = i
+                break
+    if end_idx < start_idx:
+        start_idx, end_idx = end_idx, start_idx
+    chosen = ordered[start_idx:end_idx + 1]
+    ids = {c.id for c in chosen}
+
+    prose_alloc = max(1500, int((BUDGET - 8000) / max(len(chosen), 1)))
+    chapters_out = []
+    for idx, c in enumerate(chosen):
+        raw = fm.read_chapter_prose(story.id, book.id, c.id)
+        chapters_out.append({
+            "index": start_idx + idx + 1,
+            "id": c.id,
+            "title": c.title,
+            "pov": c.pov_character_id,
+            "scene_breakdown": cap_text(c.scene_breakdown or "", 800),
+            "word_count": c.word_count,
+            "prose": slice_span(raw, prose_alloc) if raw.strip() else "",
+        })
+
+    beats = [
+        {"id": b.id, "title": b.title, "description": cap_text(b.description, 300),
+         "chapter_id": b.chapter_id, "character_ids": list(b.character_ids or [])}
+        for b in fm.get_plot(story.id, book.id).beats
+        if b.chapter_id and b.chapter_id in ids
+    ]
+
+    char_ids = set()
+    for c in chosen:
+        if c.pov_character_id:
+            char_ids.add(c.pov_character_id)
+    for b in beats:
+        char_ids.update(b.get("character_ids") or [])
+    chars = {
+        c.id: {"name": c.name, "role": c.role, "location": c.location,
+               "bio": cap_text(c.bio or "", 500), "notes": [cap_text(n, 300) for n in (c.notes or [])][:8]}
+        for c in fm.list_characters(story.id) if c.id in char_ids
+    }
+
+    return {
+        "book": {"id": book.id, "title": book.title, "order": book.order},
+        "range_label": f"Chapters {start_idx + 1}–{end_idx + 1} ({chosen[0].title} → {chosen[-1].title})",
+        "chapters": chapters_out,
+        "beats": beats,
+        "characters": list(chars.values()),
     }
 
 

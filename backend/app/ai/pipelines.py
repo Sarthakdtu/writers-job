@@ -245,6 +245,23 @@ _register(PipelineDef(
     steps=[_text_step("perspective_rewrite", model_preferred="qwen2.5:7b")],
 ))
 
+# Chapter interconnectedness judge: an LLM evaluates how well the plot progresses and
+# how interconnected the chapters in a x→y range are, using a user-supplied prompt.
+# Driven from the Book Outliner's dedicated "Judge" tab (who also supplies the range),
+# so it carries NO tabs of its own and never surfaces as a standalone AIPanel card.
+_register(PipelineDef(
+    id="chapter_interconnect",
+    name="Chapter Interconnectedness Judge",
+    description="Judges plot progression and interconnection across a range of chapters (x→y) using your custom prompt.",
+    tabs=[],
+    input_kind="selection",
+    needs_selection=True,
+    selection_param="chapter_id",
+    context_builder="chapter_interconnect",
+    system_prompt_key="analysis",
+    steps=[_text_step("chapter_interconnect")],
+))
+
 # --- Import & Extract pipelines -------------------------------------------
 
 _register(PipelineDef(

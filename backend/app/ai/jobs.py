@@ -285,6 +285,8 @@ class JobManager:
                 if pipeline.id == "perspective_rewrite" and run_input is not None:
                     selection = run_input.text or params.get("selection", "")
                     perspective = params.get("perspective", "")
+                if pipeline.id == "chapter_interconnect" and run_input is not None:
+                    selection = run_input.text or params.get("prompt", "")
                 messages = prompt_mod.step_messages(
                     step.prompt_key,
                     context=context_str,

@@ -309,6 +309,20 @@ def step_messages(
             {"role": "user", "content": task},
         ]
 
+    if prompt_key == "chapter_interconnect":
+        # The user's judging criteria arrive in `selection`; the chapter range + prose
+        # + beats + characters arrive in `context`. Always attach the analysis role.
+        task = selection.strip() or (
+            "Assess how well the plot progresses across these chapters and how "
+            "interconnected they are."
+        )
+        if context:
+            task = f"Story context (JSON):\n{context}\n\n---\n\n{task}"
+        return [
+            {"role": "system", "content": SYSTEM_PREFIXES["analysis"]},
+            {"role": "user", "content": task},
+        ]
+
     if custom_prompt:
         user_text = custom_prompt
         if prev_output:

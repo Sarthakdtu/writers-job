@@ -70,7 +70,7 @@ export const CharacterMapView = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const [selectedNodeId, setSelectedNodeId] = useState(null);
+  const [pairNodeIds, setPairNodeIds] = useState([]);
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
   const [hoveredNodeId, setHoveredNodeId] = useState(null);
   const [hoveredEdgeId, setHoveredEdgeId] = useState(null);
@@ -89,7 +89,7 @@ export const CharacterMapView = () => {
     if (!activeStory) return;
     setLoading(true);
     setError(null);
-    setSelectedNodeId(null);
+    setPairNodeIds([]);
     setSelectedEdgeId(null);
     try {
       const res = await fetch(`/api/stories/${activeStory.id}/character-map`);
@@ -157,6 +157,10 @@ export const CharacterMapView = () => {
     [visibleEdges]
   );
 
+  const firstNodeId = pairNodeIds.length > 0 ? pairNodeIds[0] : null;
+  const secondNodeId = pairNodeIds.length > 1 ? pairNodeIds[1] : null;
+  const isPairMode = pairNodeIds.length === 2;
+
   const visibleNodes = useMemo(() => {
     if (showIsolated) return mapData.nodes;
     const linked = new Set();
@@ -164,27 +168,40 @@ export const CharacterMapView = () => {
       linked.add(e.source);
       linked.add(e.target);
     });
-    if (selectedNodeId) linked.add(selectedNodeId);
+    if (firstNodeId) linked.add(firstNodeId);
     return mapData.nodes.filter((n) => linked.has(n.id));
-  }, [mapData, showIsolated, visibleEdges, selectedNodeId]);
+  }, [mapData, showIsolated, visibleEdges, firstNodeId]);
 
   const graphData = useMemo(
     () => ({ nodes: visibleNodes, links: visibleEdges }),
     [visibleNodes, visibleEdges]
   );
 
-  const selectedNode = selectedNodeId ? nodesById[selectedNodeId] || null : null;
+  const selectedNode = firstNodeId ? nodesById[firstNodeId] || null : null;
+
+  const pairEdgeIds = useMemo(() => {
+    if (!isPairMode) return new Set();
+    const [a, b] = pairNodeIds;
+    const s = new Set();
+    for (const e of visibleEdges) {
+      const su = graphId(e.source);
+      const t = graphId(e.target);
+      if ((su === a && t === b) || (su === b && t === a)) s.add(e.id);
+    }
+    return s;
+  }, [isPairMode, pairNodeIds, visibleEdges]);
+
+  const pairActive = isPairMode && pairEdgeIds.size > 0;
 
   const selectedNodeConnected = useMemo(() => {
-    if (!selectedNodeId) return new Set();
-    const s = new Set([selectedNodeId]);
+    if (!firstNodeId) return new Set();
+    const s = new Set([firstNodeId]);
     visibleEdges.forEach((e) => {
-      if (e.source === selectedNodeId) s.add(e.target);
-      if (e.target === selectedNodeId) s.add(e.source);
+      if (graphId(e.source) === firstNodeId) s.add(graphId(e.target));
+      if (graphId(e.target) === firstNodeId) s.add(graphId(e.source));
     });
     return s;
-  }, [selectedNodeId, visibleEdges]);
-
+  }, [firstNodeId, visibleEdges]);
   const selectedEdge = useMemo(() => {
     if (!selectedEdgeId || !visibleEdgeIds.has(selectedEdgeId)) return null;
     return visibleEdgeById[selectedEdgeId];
@@ -210,59 +227,92 @@ export const CharacterMapView = () => {
   const fitTrigger = `${mapData.nodes.length}:${visibleEdges.length}:${showIsolated}`;
 
   useEffect(() => {
+    if (!mapData.nodes.length || !graphRef.current) return;
+    graphRef.current.d3Force('link', null);
+  }, [mapData]);
+
+  useEffect(() => {
     if (!graphData.nodes.length || !graphRef.current) return;
     const t = setTimeout(() => {
-      graphRef.current && graphRef.current.zoomToFit(500, 60);
+      graphRef.current && graphRef.current.zoomToFit(500, 90);
     }, 80);
     return () => clearTimeout(t);
   }, [fitTrigger]);
 
   const fitView = () => {
-    graphRef.current && graphRef.current.zoomToFit(400, 60);
+    graphRef.current && graphRef.current.zoomToFit(400, 90);
   };
 
   const handleNodeClick = (node) => {
-    setSelectedNodeId((prev) => (prev === node.id ? null : node.id));
     setSelectedEdgeId(null);
+    if (pairNodeIds.length === 0) {
+      setPairNodeIds([node.id]);
+    } else if (pairNodeIds.length === 1) {
+      if (pairNodeIds[0] === node.id) {
+        setPairNodeIds([]);
+        return;
+      }
+      setPairNodeIds([pairNodeIds[0], node.id]);
+    } else {
+      setPairNodeIds([node.id]);
+    }
   };
 
   const handleLinkClick = (link) => {
     setSelectedEdgeId(link.id);
-    setSelectedNodeId(null);
+    setPairNodeIds([]);
   };
 
   const handleBackgroundClick = () => {
-    setSelectedNodeId(null);
+    setPairNodeIds([]);
     setSelectedEdgeId(null);
   };
 
   const isEdgeActive = (link) => {
     if (selectedEdgeId) return selectedEdgeId === link.id;
-    if (selectedNodeId) {
-      return graphId(link.source) === selectedNodeId || graphId(link.target) === selectedNodeId;
+    if (isPairMode) return pairEdgeIds.has(link.id);
+    if (pairNodeIds.length === 1) {
+      return graphId(link.source) === firstNodeId || graphId(link.target) === firstNodeId;
     }
     return hoveredEdgeId === link.id;
   };
 
-  const linkColorFn = (link) => {
-    if (selectedEdgeId || selectedNodeId) {
-      return isEdgeActive(link) ? palette.accent : palette.borderSubtle;
+  const isEdgeVisible = (link) => {
+    if (selectedEdgeId) return selectedEdgeId === link.id;
+    if (isPairMode) return pairEdgeIds.has(link.id);
+    if (pairNodeIds.length === 1) {
+      return graphId(link.source) === firstNodeId || graphId(link.target) === firstNodeId;
     }
-    return hoveredEdgeId === link.id ? palette.accent : hexToRgba(palette.accent, 0.3);
+    return false;
+  };
+
+  const linkColorFn = (link) => {
+    if (!isEdgeVisible(link)) return 'rgba(0,0,0,0)';
+    return isEdgeActive(link) || hoveredEdgeId === link.id
+      ? palette.accent
+      : hexToRgba(palette.accent, 0.4);
   };
 
   const linkWidthFn = (link) => {
+    if (!isEdgeVisible(link)) return 0;
     const base = 0.8 + Math.min((link.weight || 1) * 0.75, 3.4);
     return base + (isEdgeActive(link) || hoveredEdgeId === link.id ? 2.4 : 0);
   };
 
+  const isNodeDimmed = (node) => {
+    if (pairNodeIds.length === 1) return !selectedNodeConnected.has(node.id);
+    return false;
+  };
+
   const drawNode = (node, ctx, globalScale) => {
-    const dim = selectedNodeId && !selectedNodeConnected.has(node.id);
+    const dim = isNodeDimmed(node);
     const r = nodeRadius(node.degree || 0);
     const label = (node.name || node.id || '').slice(0, 26);
+    const isHighlighted =
+      pairNodeIds.includes(node.id) || hoveredNodeId === node.id;
     ctx.save();
-    ctx.globalAlpha = dim ? 0.28 : 1;
-    if (selectedNodeId === node.id || hoveredNodeId === node.id) {
+    ctx.globalAlpha = dim ? 0.2 : 1;
+    if (isHighlighted) {
       ctx.beginPath();
       ctx.arc(node.x, node.y, r + 4 / globalScale, 0, 2 * Math.PI);
       ctx.lineWidth = 2 / globalScale;
@@ -271,7 +321,7 @@ export const CharacterMapView = () => {
     }
     ctx.beginPath();
     ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
-    ctx.fillStyle = selectedNodeId === node.id ? palette.accentHover : palette.accent;
+    ctx.fillStyle = pairNodeIds.includes(node.id) ? palette.accentHover : palette.accent;
     ctx.fill();
     ctx.lineWidth = 1.5 / globalScale;
     ctx.strokeStyle = palette.border;
@@ -349,9 +399,9 @@ export const CharacterMapView = () => {
               The Web of {activeStory.title}
             </h1>
             <p className="text-xs text-[var(--text-muted)] mt-2 max-w-2xl">
-              A living graph of who meets whom. Every bond is drawn from a plot beat that lists two
-              or more characters together — click an edge to see those interactions broken down by
-              book and chapter.
+              A living graph of who meets whom. Bonds are hidden by default for clarity — click one
+              character, then another, to reveal the bond between them, then click that bond to see
+              its interactions broken down by book and chapter.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -482,7 +532,9 @@ export const CharacterMapView = () => {
               linkLabel={linkLabelFn}
               linkColor={linkColorFn}
               linkWidth={linkWidthFn}
-              linkDirectionalParticles={(l) => (selectedEdgeId === l.id ? 4 : 0)}
+              linkDirectionalParticles={(l) =>
+                selectedEdgeId === l.id || (isPairMode && pairEdgeIds.has(l.id)) ? 4 : 0
+              }
               linkDirectionalParticleWidth={1.8}
               linkDirectionalParticleSpeed={0.008}
               linkDirectionalParticleColor={palette.accent}
@@ -491,19 +543,21 @@ export const CharacterMapView = () => {
               onLinkClick={handleLinkClick}
               onLinkHover={(l) => setHoveredEdgeId(l ? l.id : null)}
               onBackgroundClick={handleBackgroundClick}
-              cooldownTime={4000}
-              cooldownTicks={90}
-              warmupTicks={10}
-              d3AlphaDecay={0.06}
-              d3VelocityDecay={0.35}
+              cooldownTime={5000}
+              cooldownTicks={120}
+              warmupTicks={15}
+              d3AlphaDecay={0.05}
+              d3VelocityDecay={0.4}
+              chargeStrength={-450}
+              d3ForceCollide={(node) => nodeRadius(node.degree || 0) * 2 + 22}
               minZoom={0.15}
               maxZoom={6}
               backgroundColor="transparent"
             />
           )}
 
-          {/* Selected node chip */}
-          {selectedNode && (
+          {/* Selection chip: single node (pending) or pair */}
+          {pairNodeIds.length === 1 && selectedNode && (
             <div className="absolute top-3 left-3 z-10 flex items-center gap-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)]/90 px-3 py-2 shadow-lg backdrop-blur animate-in fade-in">
               <CharBubble char={selectedNode} sizeClass="h-8 w-8" />
               <div>
@@ -511,12 +565,47 @@ export const CharacterMapView = () => {
                 <div className="text-[10px] text-[var(--text-muted)]">
                   {selectedNode.role || 'Character'} · {selectedNodeConnected.size - 1} bond{selectedNodeConnected.size - 1 === 1 ? '' : 's'}
                 </div>
-                {selectedNode.degree === 0 && (
-                  <div className="text-[10px] italic text-[var(--text-dim)]">No bonds yet — add them to shared plot beats</div>
-                )}
+                <div className="text-[10px] italic text-[var(--accent)]">
+                  Now click a second character to trace their bond
+                </div>
               </div>
               <button
-                onClick={() => setSelectedNodeId(null)}
+                onClick={() => setPairNodeIds([])}
+                className="rounded-md p-1 text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)] transition-colors cursor-pointer"
+                title="Clear selection"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+
+          {isPairMode && (
+            <div className="absolute top-3 left-3 z-10 flex items-center gap-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)]/90 px-3 py-2 shadow-lg backdrop-blur animate-in fade-in">
+              <CharBubble char={nodesById[firstNodeId]} sizeClass="h-8 w-8" />
+              <span className="text-sm font-bold text-[var(--text-main)]">
+                {nodesById[firstNodeId]?.name || firstNodeId}
+              </span>
+              <span className="text-xs text-[var(--text-dim)]">↔</span>
+              <CharBubble char={nodesById[secondNodeId]} sizeClass="h-8 w-8" />
+              <span className="text-sm font-bold text-[var(--text-main)]">
+                {nodesById[secondNodeId]?.name || secondNodeId}
+              </span>
+              <div className="flex flex-col items-start pl-1 border-l border-[var(--border-subtle)]">
+                {pairActive ? (
+                  <span className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent-light)] px-2 py-0.5 text-[10px] font-bold text-[var(--accent)] border border-[var(--border-subtle)]">
+                    {pairEdgeIds.size} bond{pairEdgeIds.size === 1 ? '' : 's'} highlighted
+                  </span>
+                ) : (
+                  <span className="text-[10px] italic text-[var(--text-dim)]">
+                    No direct bond between these two
+                  </span>
+                )}
+                <span className="text-[10px] text-[var(--text-muted)]">
+                  {pairActive ? 'All other edges hidden' : 'Try another pair'}
+                </span>
+              </div>
+              <button
+                onClick={() => setPairNodeIds([])}
                 className="rounded-md p-1 text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)] transition-colors cursor-pointer"
                 title="Clear selection"
               >
@@ -545,8 +634,9 @@ export const CharacterMapView = () => {
         {/* Legend footer */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[10px] text-[var(--text-dim)]">
           <span>
-            Drag characters to rearrange · scroll to zoom · click empty space to deselect · edges
-            list the plot beats two characters share, grouped by book and chapter.
+            Drag characters to rearrange · scroll to zoom · click empty space to deselect · click
+            one character then another to reveal their bond · click the bond to explore its plot
+            beats grouped by book and chapter.
           </span>
           <span className="font-mono">
             {visibleNodes.length} shown · {visibleEdges.length} bonds

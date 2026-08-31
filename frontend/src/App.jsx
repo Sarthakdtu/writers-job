@@ -20,6 +20,7 @@ import { QuotesView } from './components/modules/QuotesView';
 import { SkillStudioView } from './components/modules/SkillStudioView';
 import { TrashView } from './components/modules/TrashView';
 import { GoogleDriveModal } from './components/GoogleDriveModal';
+import { ExplorerPanel } from './components/ExplorerPanel';
 
 class AppErrorBoundary extends Component {
   constructor(props) {
@@ -125,6 +126,9 @@ const MainLayout = () => {
 
       {/* AI Assistant Panel (Ctrl+Shift+A) */}
       <AIPanel isOpen={aiPanelOpen} onClose={() => setAiPanelOpen(false)} />
+
+      {/* Universe Explorer (bottom-right widget + side panel) */}
+      <ExplorerPanel />
     </div>
   );
 };

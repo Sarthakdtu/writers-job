@@ -59,8 +59,8 @@ writer_job/
 │       │   ├── schemas.py    ← AIStatus, ModelInfo, AIConfig, AIJob, AIResult, PipelineSummary,
 │       │                       CustomSkill, RouterRequest, RouterDecision
 │       │   ├── prompts.py    ← SYSTEM_PREFIXES, TASKS, STAGE_LABELS, ROUTER_SYSTEM, step_messages
-│       │   ├── pipelines.py  ← PipelineDef registry: 19 analysis + 3 import pipelines
-│       │   ├── context.py    ← 18 context builders + build_context_from_sources (budget/drop)
+│       │   ├── pipelines.py  ← PipelineDef registry: 20 analysis + 3 import pipelines
+│       │   ├── context.py    ← 19 context builders + build_context_from_sources (budget/drop)
 │       │   ├── store.py      ← AiStore: per-story ai/{config.json,jobs/,results/}
 │       │   ├── custom.py     ← Custom skill CRUD + duplicate + auto-routing
 │       │   ├── router.py     ← Context Router (LLM + keyword fallback)
@@ -91,6 +91,10 @@ writer_job/
 │           ├── GoogleDriveModal.jsx    ← backup status + trigger sync
 │           ├── ArtifactFormModal.jsx   ← shared artifact create/edit modal
 │           ├── AIPanel.jsx             ← ⌘⇧A right-drawer: per-tab skill cards, run/cancel, config, image picker
+│           ├── ExplorerPanel.jsx       ← global bottom-right compass widget + horizontal hover
+│           │                             quick-access bar of the top-5 frequently-used entities (image
+│           │                             avatars, no sidebar). Clicking one shows a popup of its top-3 quick
+│           │                             notes; a dashed "All" button opens a searchable browse-universe popup.
 │           └── modules/
 │               ├── HomeView.jsx             ← Home page: all-stories gallery, tags, New Story
 │               ├── DashboardView.jsx        ← Per-story dashboard: overview, fun-facts, theme, memorable quotes (character + standalone)
@@ -98,9 +102,13 @@ writer_job/
 │               ├── CharacterRosterView.jsx  ← Roster, gallery, artifacts, appearances, timeline (first portrait auto-added to gallery)
 │               ├── CharacterMapView.jsx     ← Force-directed relationship graph (react-force-graph-2d); clickable edges open a
 │                                              book→chapter interaction panel; strength filter + hide-isolated
-│               ├── BookOutlinerView.jsx     ← Book/chapter tree, plot beats, arcs, POV tracker
+│               ├── BookOutlinerView.jsx     ← Book/chapter tree, plot beats, arcs, POV tracker,
+│               │                              + "Chapter Judge" sub-tab (chapter_interconnect skill)
 │               ├── QuotesView.jsx           ← Standalone quotes (text + note + tags) tab
-│               ├── DraftEditorView.jsx      ← Markdown + Google Docs dual mode, autosave
+│               ├── DraftEditorView.jsx      ← Markdown + Google Docs dual mode, autosave;
+│                                              publishes `loresmith:editor-context` window event
+│                                              (title/sceneBreakdown/prose) when a chapter loads,
+│                                              consumed by ExplorerPanel for relevance ranking
 │               ├── SkillStudioView.jsx      ← Skill Studio (activeTab 'ai'): custom skill CRUD,
 │                                              router preview + editable/lockable source chips,
 │                                              test-run with inline result (react-markdown, no prose plugin)
@@ -356,15 +364,20 @@ files and simulates Drive sync; it sets `_backup_status` in **module-level memor
   `CustomSkill`, `RouterRequest`, `RouterDecision`.
 - `prompts.py`: `SYSTEM_PREFIXES`, `TASKS` for all 21 pipelines, `STAGE_LABELS`,
   `ROUTER_SYSTEM`, `step_messages` helper.
-- `pipelines.py`: `PipelineDef` registry — 19 analysis + 3 import pipelines (incl. `perspective_rewrite`). Built-in `StepSpec`s
+- `pipelines.py`: `PipelineDef` registry — 20 analysis + 3 import pipelines (incl. `perspective_rewrite`, and
+  `chapter_interconnect` which carries **no tabs** so it is driven only from the Book Outliner's
+  "Chapter Judge" sub-tab, not the AI Studio panel). Built-in `StepSpec`s
   may set `model_preferred` to pin a specific installed model for that step (used by
   `perspective_rewrite` → `qwen2.5:7b`, because the default reasoning model qwen3.5:9b is
   far too slow for interactive rewrites and times out). `jobs._resolve_step_model` honors
   `step.model_preferred` ahead of the family/config default.
-- `context.py`: 18 context builders + `SOURCE_BUILDERS` + `build_context_from_sources`
+- `context.py`: 19 context builders + `SOURCE_BUILDERS` + `build_context_from_sources`
   with budget/drop logic and "sampled N" notes. All builders share the uniform
   signature `(fm, story, params=None)` — custom-skill runs assemble context here from
-  `routing.sources` (built-in pipelines use `build_context`).
+  `routing.sources` (built-in pipelines use `build_context`). The `chapter_interconnect`
+  builder (`_chapter_range_context`) sorts chapters by numeric id and slices the
+  `chapter_id`→`chapter_end` range (defaults to a single chapter when `chapter_end` is
+  omitted), returning ordered prose slices + in-range plot beats + appearing characters.
 - `store.py`: `AiStore` — per-story `ai/{config.json,jobs/,results/}` persistence.
 - `custom.py`: async custom skill CRUD + duplicate + auto-routing (`route_skill`).
   `create`/`update` skip the router when `routing_mode=="locked"` + explicit
@@ -389,7 +402,35 @@ files and simulates Drive sync; it sets `_backup_status` in **module-level memor
 ### 5.1 Provider nesting (`App.jsx`)
 `ThemeProvider` → `StoryProvider` → `MainLayout`. `MainLayout` renders `Navbar`,
 `Sidebar`, `AmbientBackground`, the active module (from `activeTab` switch), the global
-`QuickSearchModal`, and the `GoogleDriveModal`. **Focus mode** hides the navbar/sidebar.
+`QuickSearchModal`, `GoogleDriveModal`, the global `ExplorerPanel` (bottom-right widget +
+right-drawer), and the `AIPanel`. **Focus mode** hides the navbar/sidebar; the Explorer
+widget stays visible.
+
+#### 5.1.1 Universe Explorer (`ExplorerPanel.jsx`)
+A self-contained, global component rendered once in `MainLayout` on every tab. A fixed
+bottom-right circular compass anchors a **horizontal quick-access bar** (no sidebar, no
+radial fan). The compass + bar form a single **hover zone** (a fixed ~30rem-wide band at the
+bottom-right): hovering **expands** the tray **leftward** listing the **top 5
+frequently-used entities** (each showing its **image avatar** when available, else a type
+icon) plus a dashed "All" button; leaving the rectangular band **collapses** it back.
+- Clicking an entity opens a compact popup above the bar with its **top-3 quick notes**; the
+  "All" button opens a small searchable "browse universe" popup (with per-type filter chips).
+  Clicking outside closes the popups.
+- **Top-5 ranking = mix of** relevance + usage. Relevance is keyword overlap of character
+  notes with the current chapter context (the `loresmith:editor-context` window event below);
+  usage is a per-story tally of opens (`count` + `lastUsed`) persisted in `localStorage` key
+  `loresmith_explorer_usage_v1` (`{ [storyId]: { [type:id]: { count, lastUsed } } }`).
+- **Characters**: the top-3 `notes[]` ranked by relevance to the current chapter; falls back
+  to the first 3 when there's no context. A "Show all N notes" expander reveals the rest.
+- **Cities / Factions / Artifacts / Glossary**: their descriptive fields (region/atmosphere,
+  leader/alignment, type/properties, definition) as the quick notes.
+Notes render `[[type:id|label]]` tokens as references via `EntityReferenceText` with a refs
+map rebuilt from loaded data.
+
+The relevance context comes from the `loresmith:editor-context` **window** `CustomEvent`
+(`detail = { title, sceneBreakdown, prose }`) that `DraftEditorView` dispatches whenever a
+chapter's prose loads. Any surface that wants to drive Explorer relevance can dispatch the
+same event; keep the detail shape stable.
 
 ### 5.2 Contexts
 - **`StoryContext`** (`useStory`): `stories`, `activeStory`, `selectStory`, `createStory`,
