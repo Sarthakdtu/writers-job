@@ -234,6 +234,22 @@ class WritingStats(BaseModel):
     recent_activity: List[WritingStatsDay] = Field(default_factory=list)
 
 
+class GoogleAccount(BaseModel):
+    email: str
+    name: str = ""
+    picture: str = ""
+    connected_at: str
+    scopes: List[str] = Field(default_factory=list)
+
+
+class GoogleAuthStatus(BaseModel):
+    connected: bool
+    account: Optional[GoogleAccount] = None
+    client_secret_available: bool
+    auth_url: Optional[str] = None
+    state: Optional[str] = None
+
+
 class Story(BaseModel):
     id: str
     title: str

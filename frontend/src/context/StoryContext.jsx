@@ -1,8 +1,10 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
 const StoryContext = createContext(null);
 
 const ACTIVE_STORY_KEY = 'writer_job_active_story_id';
+const GOOGLE_CONNECTED_KEY = 'writer_job_google_connected';
+const GOOGLE_PROFILE_KEY = 'writer_job_google_profile';
 
 export const StoryProvider = ({ children }) => {
   const [stories, setStories] = useState([]);
@@ -14,6 +16,45 @@ export const StoryProvider = ({ children }) => {
   const [quickSearchOpen, setQuickSearchOpen] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  const [googleConnected, setGoogleConnected] = useState(() =>
+    JSON.parse(localStorage.getItem(GOOGLE_CONNECTED_KEY) || 'false')
+  );
+  const [googleProfile, setGoogleProfile] = useState(() =>
+    JSON.parse(localStorage.getItem(GOOGLE_PROFILE_KEY) || 'null')
+  );
+
+  const setGoogleAccount = useCallback((profile) => {
+    setGoogleProfile(profile);
+    setGoogleConnected(Boolean(profile));
+    if (profile) {
+      localStorage.setItem(GOOGLE_PROFILE_KEY, JSON.stringify(profile));
+      localStorage.setItem(GOOGLE_CONNECTED_KEY, 'true');
+    } else {
+      localStorage.removeItem(GOOGLE_PROFILE_KEY);
+      localStorage.removeItem(GOOGLE_CONNECTED_KEY);
+    }
+  }, []);
+
+  const refreshGoogleAccount = useCallback(async () => {
+    try {
+      const res = await fetch('/api/auth/google/status');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.connected && data.account) {
+          setGoogleAccount(data.account);
+        } else {
+          setGoogleAccount(null);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to refresh Google account:', err);
+    }
+  }, [setGoogleAccount]);
+
+  useEffect(() => {
+    refreshGoogleAccount();
+  }, [refreshGoogleAccount]);
 
   // Fetch stories on load
   const fetchStories = async () => {
@@ -208,6 +249,10 @@ export const StoryProvider = ({ children }) => {
         aiPanelOpen,
         setAiPanelOpen,
         loading,
+        googleConnected,
+        googleProfile,
+        setGoogleAccount,
+        refreshGoogleAccount,
       }}
     >
       {children}

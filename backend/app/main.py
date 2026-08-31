@@ -7,9 +7,11 @@ from pydantic import BaseModel
 from app.schemas import (
     Story, Character, CharacterAppearances, CharacterMap, WorldMechanics, City, Faction, Artifact,
     GlossaryTerm, Quote, Book, Chapter, Plot, CharacterArc, StoryImageItem, EntityRefItem,
-    WritingStats
+    WritingStats, GoogleAuthStatus
 )
 from app.file_manager import FileManager
+from app.google_auth import GoogleAuthService
+from app.google_drive_backup import GoogleDriveBackupService
 from app.ai.ollama import OllamaClient, cached_models
 from app.ai.schemas import (
     AIStatus, AIConfig, RunRequest, RunInput, AIJob, AIResult, PipelineSummary,
@@ -23,6 +25,8 @@ from app.ai.store import AiStore
 from app.ai.jobs import JobManager
 
 file_manager = FileManager()
+auth_service = GoogleAuthService(file_manager.base_data_dir)
+backup_service = GoogleDriveBackupService(auth_service, file_manager.base_data_dir)
 ollama_client = OllamaClient()
 ai_store = AiStore(file_manager.base_data_dir)
 job_manager = JobManager(file_manager, ai_store, file_manager.base_data_dir)
@@ -350,85 +354,131 @@ def save_chapter_content(story_id: str, book_id: str, ch_id: str, payload: Prose
 
 _backup_status = {
     "status": "in_sync",
-    "last_sync_time": None,
+    "last_sync_time": backup_service.load_last_sync_time(),
     "total_files_synced": 0,
     "error_message": None
 }
 
 
-@app.get("/api/auth/google")
-def google_oauth_flow():
-    """
-    Triggers OAuth2 authorization flow using google-auth-oauthlib.
-    If client_secrets.json exists, returns the authorization URL.
-    Otherwise provides an automated local developer token fallback.
-    """
-    import os
-    client_secret_path = os.getenv("GOOGLE_CLIENT_SECRET_PATH", "client_secret.json")
-    if os.path.exists(client_secret_path):
-        try:
-            from google_auth_oauthlib.flow import Flow
-            flow = Flow.from_client_secrets_file(
-                client_secret_path,
-                scopes=["https://www.googleapis.com/auth/drive.file"],
-                redirect_uri="http://localhost:8000/api/auth/google/callback"
-            )
-            auth_url, state = flow.authorization_url(prompt="consent")
-            return {"status": "ok", "auth_url": auth_url, "state": state}
-        except Exception as e:
-            return {"status": "error", "message": f"OAuth initialization error: {str(e)}"}
-    else:
-        return {
-            "status": "ready",
-            "auth_url": None,
-            "message": "Local developer mode active (No client_secret.json required for local test environment). Auth token auto-generated."
-        }
+@app.get("/api/auth/google", response_model=GoogleAuthStatus)
+def google_auth_initiate():
+    status = auth_service.get_status()
+    if status.connected:
+        return status
+
+    if not auth_service.has_client_secret():
+        return status
+
+    auth_url, state = auth_service.start_auth()
+    return GoogleAuthStatus(
+        connected=False,
+        account=None,
+        client_secret_available=True,
+        auth_url=auth_url,
+        state=state,
+    )
+
+
+@app.get("/api/auth/google/callback")
+def google_auth_callback(code: str = Query(...), state: str = Query(...)):
+    try:
+        account = auth_service.handle_callback(code, state)
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head><title>LoreSmith — Google Connected</title></head>
+        <body style="font-family: system-ui; text-align: center; padding: 3rem;">
+            <h2 style="color: #16a34a;">&#10003; Google Account Connected</h2>
+            <p>Signed in as <strong>{account.email}</strong></p>
+            <p>You can close this window.</p>
+            <script>
+                if (window.opener) {{
+                    window.opener.postMessage({{ type: 'google-auth-success', email: '{account.email}' }}, '*');
+                }}
+                setTimeout(() => window.close(), 2000);
+            </script>
+        </body>
+        </html>
+        """
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content=html)
+    except ValueError as e:
+        from fastapi.responses import HTMLResponse
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head><title>LoreSmith — Auth Error</title></head>
+        <body style="font-family: system-ui; text-align: center; padding: 3rem;">
+            <h2 style="color: #dc2626;">&#10007; Authentication Failed</h2>
+            <p>{str(e)}</p>
+            <p>You can close this window and try again.</p>
+            <script>
+                if (window.opener) {{
+                    window.opener.postMessage({{ type: 'google-auth-error', error: '{str(e)}' }}, '*');
+                }}
+                setTimeout(() => window.close(), 3000);
+            </script>
+        </body>
+        </html>
+        """
+        return HTMLResponse(content=html, status_code=400)
+
+
+@app.get("/api/auth/google/status", response_model=GoogleAuthStatus)
+def google_auth_status():
+    return auth_service.get_status()
+
+
+@app.post("/api/auth/google/disconnect")
+def google_auth_disconnect():
+    had_account = auth_service.disconnect()
+    if not had_account:
+        raise HTTPException(status_code=400, detail="No Google account is currently connected")
+    return {"message": "Google account disconnected successfully"}
 
 
 @app.get("/api/backup/status")
 def get_backup_status():
-    return _backup_status
+    auth_status = auth_service.get_status()
+    return {
+        **_backup_status,
+        "connected": auth_status.connected,
+        "account_email": auth_status.account.email if auth_status.account else None,
+        "account_name": auth_status.account.name if auth_status.account else None,
+        "account_picture": auth_status.account.picture if auth_status.account else None,
+    }
 
 
 @app.post("/api/backup/google-drive")
 async def trigger_google_drive_backup(story_id: Optional[str] = None):
-    """
-    Recursive async task that mirrors local /data/stories/ folder to Google Drive
-    inside a dedicated 'LoreSmith Backups' folder and converts .md files to Google Docs.
-    """
+    auth_status = auth_service.get_status()
+    if not auth_status.connected:
+        raise HTTPException(
+            status_code=401,
+            detail="No Google account connected. Click 'Connect to Google Drive' first.",
+        )
+
     global _backup_status
     _backup_status["status"] = "syncing"
     _backup_status["error_message"] = None
 
     try:
-        import time, os
-        from pathlib import Path
+        import time
 
         story_slugs = [story_id] if story_id else [s.id for s in file_manager.list_stories()]
-        synced_files_count = 0
+        result = backup_service.sync_all_or_story(story_id, story_slugs)
 
-        # Simulate or execute recursive traversal of /data/stories/[slug]
-        for slug in story_slugs:
-            story_dir = file_manager.get_story_dir(slug)
-            if not story_dir.exists():
-                continue
-
-            for root, dirs, files in os.walk(story_dir):
-                for file_name in files:
-                    if file_name.endswith(".tmp") or ".tmp." in file_name:
-                        continue
-                    synced_files_count += 1
-
-        # Record successful backup completion timestamp
+        synced_files_count = result["files_synced"]
         _backup_status["status"] = "in_sync"
         _backup_status["last_sync_time"] = time.strftime("%Y-%m-%d %H:%M:%S")
         _backup_status["total_files_synced"] = synced_files_count
+        backup_service.save_sync_time(_backup_status["last_sync_time"])
 
         return {
-            "message": "Google Drive recursive backup completed successfully!",
-            "stories_backed_up": story_slugs,
+            "message": f"Google Drive backup completed for {len(result['stories_backed_up'])} story(s)!",
+            "stories_backed_up": result["stories_backed_up"],
             "files_synced": synced_files_count,
-            "markdown_converted_to_docs": True,
+            "markdown_converted_to_docs": False,
             "status": "in_sync",
             "last_sync": _backup_status["last_sync_time"]
         }

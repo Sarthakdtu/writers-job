@@ -52,6 +52,8 @@ writer_job/
 │       ├── file_manager.py   ← FileManager: all filesystem read/write logic per feature
 │       ├── file_utils.py     ← Low-level atomic + thread-safe JSON/text/delete helpers
 │       ├── schemas.py        ← All Pydantic models (Story, Character, World, Book, Chapter, ...)
+│       ├── google_auth.py    ← GoogleAuthService: OAuth2 flow, token/account persistence
+│       ├── google_drive_backup.py ← GoogleDriveBackupService: real, idempotent Drive upload (see §4.6)
 │       ├── ai/               ← Local Ollama integration (see §4.5)
 │       │   ├── config.py     ← OLLAMA_* env settings
 │       │   ├── ollama.py     ← Generic async Ollama client (capabilities, health, complete)
@@ -326,8 +328,10 @@ REST endpoints in `main.py`. The frontend calls these via the Vite dev proxy. Su
   `PUT/POST .../chapters/{ch_id}/content` (alias `/prose`)
 - **Google Drive / Backup:**
   - `GET /api/auth/google` — OAuth flow init
-  - `GET /api/backup/status` — returns in-memory `_backup_status` dict
-  - `POST /api/backup/google-drive?story_id=` — recursive backup
+  - `GET /api/backup/status` — returns in-memory `_backup_status` dict (initialized from
+    persisted backup state, so `last_sync_time` survives restarts)
+  - `POST /api/backup/google-drive?story_id=` — real recursive Drive backup via
+    `GoogleDriveBackupService` (see §4.6)
 - **Local AI (Ollama):**
    - `GET /api/ai/status` → `AIStatus` (available, models w/ capabilities,
      default/ocr/vision/router models, error hint, running_jobs, queued_jobs).
@@ -343,11 +347,26 @@ REST endpoints in `main.py`. The frontend calls these via the Vite dev proxy. Su
    - `POST /api/ai/custom/{skill_id}/duplicate` — duplicate a custom skill.
    - `POST /api/ai/custom/route` — dry-run router (returns `RouterDecision` with `routed_by` badge).
 
-**Backup note:** The current `POST /api/backup/google-drive` implementation only counts
-files and simulates Drive sync; it sets `_backup_status` in **module-level memory**
-(not persisted). If you change backup to do real Drive writes, keep updating the same
+**Backup note:** `POST /api/backup/google-drive` performs a **real upload** to the connected
+account's Drive. `GoogleDriveBackupService` (`backend/app/google_drive_backup.py`) places all
+stories under a top-level `LoreSmith` folder, one subfolder per story slug. Sync is
+**idempotent** — each local file's relative path maps to a Drive file id in a per-story
+manifest, so re-syncing updates in place (no duplicates) and files removed locally are
+deleted from Drive. Backup state (root folder id + manifests + last sync time) is persisted
+in `data/stories/.credentials/backup/state.json`. The route still updates the same
 `_backup_status` shape the frontend expects:
 `{ status, last_sync_time, total_files_synced, error_message }`.
+
+### 4.6 Google Drive backup service (`google_drive_backup.py`)
+- `GoogleDriveBackupService(auth_service, base_data_dir)` — uploads story dirs to the
+  connected account's Drive using `auth_service.get_drive_service()`.
+- Key methods: `sync_all_or_story(story_slug, available_slugs)` → `{stories_backed_up,
+  files_synced}`; `sync_story(service, story_slug)` syncs one story (uploads new/changed
+  files, deletes removed ones); `save_sync_time`/`load_last_sync_time` persist the last sync
+  time across restarts.
+- Root folder name constant: `ROOT_FOLDER_NAME = "LoreSmith"`. Skips `.tmp` files. Sync
+  does **not** convert Markdown to Google Docs (the old stub wrongly reported
+  `markdown_converted_to_docs: True`; the real response reports `False`).
 
 ### 4.4 Config via environment variables
 - `DATA_DIR` — base data directory (default `data/stories`).

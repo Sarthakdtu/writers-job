@@ -30,7 +30,9 @@ export const Navbar = ({ onOpenBackupModal }) => {
     setQuickSearchOpen,
     setFocusMode,
     aiPanelOpen,
-    setAiPanelOpen
+    setAiPanelOpen,
+    googleConnected,
+    googleProfile
   } = useStory();
 
   const { theme, setTheme, THEMES } = useTheme();
@@ -224,9 +226,15 @@ export const Navbar = ({ onOpenBackupModal }) => {
           >
             <CloudUpload className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">Drive Backup</span>
-            <span className="rounded-full bg-emerald-400/30 px-1.5 py-0.5 text-[9px] font-bold text-white uppercase tracking-wider">
-              In Sync
-            </span>
+            {googleConnected ? (
+              <span className="rounded-full bg-emerald-400/30 px-1.5 py-0.5 text-[9px] font-bold text-white uppercase tracking-wider">
+                Connected
+              </span>
+            ) : (
+              <span className="rounded-full bg-amber-400/30 px-1.5 py-0.5 text-[9px] font-bold text-white uppercase tracking-wider">
+                Connect
+              </span>
+            )}
           </button>
 
           {/* AI Panel Toggle with Status Dot */}

@@ -3,6 +3,24 @@
 Every time you change functionality, add a dated entry here summarizing what changed and
 update the relevant section(s) in AGENTS.md.
 
+- **2026-09-01 — Real Google Drive backup (replaces the count-only stub).**
+  - New module `backend/app/google_drive_backup.py` — `GoogleDriveBackupService` actually
+    uploads story files (JSON, Markdown, assets) to the connected Google account's Drive
+    using `auth_service.get_drive_service()`. Files are organized under a top-level
+    `LoreSmith` folder, one subfolder per story slug.
+  - Sync is **idempotent**: each local file is tracked by its relative path → Drive file id
+    in a per-story manifest. `POST /api/backup/google-drive` updates files in place instead
+    of duplicating, and deletes from Drive any files removed locally.
+  - Backup state (the `LoreSmith` root folder id + per-story manifests + last sync time) is
+    persisted in `data/stories/.credentials/backup/state.json`, so it survives restarts.
+  - `main.py` now instantiates `backup_service = GoogleDriveBackupService(...)` and the
+    backup route calls `backup_service.sync_all_or_story(...)` instead of merely counting
+    `os.walk` files. The `_backup_status` dict is initialized with the persisted last sync
+    time. Response now reports `markdown_converted_to_docs: False` (the previous stub
+    claimed a bogus `True`).
+  - `frontend/src/components/GoogleDriveModal.jsx`: updated the success toast text to reflect
+    real file sync (no longer claims Markdown was converted to Google Docs).
+
 - **2026-09-01 — Writing Progress (streaks/session stats) dashboard card.**
   - New backend endpoint `GET /api/stories/{id}/writing-stats` → `WritingStats` model
     (`total_words`, `total_chapters`, `current_streak`, `longest_streak`, `today_words`,
