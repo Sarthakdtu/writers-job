@@ -1,13 +1,13 @@
 import os
 import shutil
 import re
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 from app.schemas import (
     Story, Character, WorldMechanics, City, Faction, Artifact, GlossaryTerm, Quote,
-    Book, Chapter, Plot, CharacterArc
+    Book, Chapter, Plot, CharacterArc, WritingStats, WritingStatsDay
 )
 from app.file_utils import (
     read_json_safe, write_json_safe, read_text_safe, write_text_safe, delete_file_safe
@@ -216,6 +216,84 @@ class FileManager:
             facts.append(f"Did you know: '{g.term}' means {g.definition}.")
 
         return facts
+
+    def get_writing_stats(self, story_slug: str) -> WritingStats:
+        """
+        Derives writing progress stats from filesystem modification times of
+        chapter markdown files. No persistent data model required; each chapter's
+        current `word_count` is attributed to the calendar day it was last edited.
+        """
+        from collections import defaultdict
+
+        day_stats = defaultdict(lambda: {"words": 0, "chapters": set()})
+        last_active_ts = None
+        total_chapters = 0
+
+        for book in self.list_books(story_slug):
+            for ch in self.list_chapters(story_slug, book.id):
+                total_chapters += 1
+                md_path = self.get_chapter_md_path(story_slug, book.id, ch.id)
+                try:
+                    mtime = md_path.stat().st_mtime
+                except OSError:
+                    continue
+                if last_active_ts is None or mtime > last_active_ts:
+                    last_active_ts = mtime
+                day = datetime.fromtimestamp(mtime).date().isoformat()
+                day_stats[day]["words"] += ch.word_count or 0
+                day_stats[day]["chapters"].add(ch.id)
+
+        active_days = set(day_stats.keys())
+        total_words = sum(d["words"] for d in day_stats.values())
+
+        today = date.today()
+        current_streak = 0
+        d = today
+        while d.isoformat() in active_days:
+            current_streak += 1
+            d -= timedelta(days=1)
+
+        longest_streak = 0
+        run = 0
+        window_start = today - timedelta(days=90)
+        d = window_start
+        while d <= today:
+            if d.isoformat() in active_days:
+                run += 1
+                longest_streak = max(longest_streak, run)
+            else:
+                run = 0
+            d += timedelta(days=1)
+
+        writing_days_total = sum(
+            1 for dd in active_days if dd >= window_start.isoformat() and dd <= today.isoformat()
+        )
+
+        recent = []
+        for i in range(13, -1, -1):
+            day = today - timedelta(days=i)
+            iso = day.isoformat()
+            stats = day_stats.get(iso, {"words": 0, "chapters": set()})
+            recent.append(WritingStatsDay(
+                date=iso,
+                words=stats["words"],
+                chapters=len(stats["chapters"]),
+            ))
+
+        today_stats = day_stats.get(today.isoformat(), {"words": 0, "chapters": set()})
+        last_active = datetime.fromtimestamp(last_active_ts).isoformat() if last_active_ts else None
+
+        return WritingStats(
+            total_words=total_words,
+            total_chapters=total_chapters,
+            current_streak=current_streak,
+            longest_streak=longest_streak,
+            today_words=today_stats["words"],
+            today_chapters=len(today_stats["chapters"]),
+            writing_days_total=writing_days_total,
+            last_active=last_active,
+            recent_activity=recent,
+        )
 
     # --- Asset Operations ---
 

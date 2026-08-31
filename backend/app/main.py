@@ -6,7 +6,8 @@ from pydantic import BaseModel
 
 from app.schemas import (
     Story, Character, CharacterAppearances, CharacterMap, WorldMechanics, City, Faction, Artifact,
-    GlossaryTerm, Quote, Book, Chapter, Plot, CharacterArc, StoryImageItem, EntityRefItem
+    GlossaryTerm, Quote, Book, Chapter, Plot, CharacterArc, StoryImageItem, EntityRefItem,
+    WritingStats
 )
 from app.file_manager import FileManager
 from app.ai.ollama import OllamaClient, cached_models
@@ -227,6 +228,11 @@ def get_story_references(story_id: str):
 @app.get("/api/stories/{story_id}/fun-facts", response_model=List[str])
 def get_story_fun_facts(story_id: str):
     return file_manager.get_story_fun_facts(story_id)
+
+
+@app.get("/api/stories/{story_id}/writing-stats", response_model=WritingStats)
+def get_writing_stats(story_id: str):
+    return file_manager.get_writing_stats(story_id)
 
 
 # --- 4. Book & Chapter Endpoints ---

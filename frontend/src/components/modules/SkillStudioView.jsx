@@ -48,13 +48,13 @@ const SKILL_EMOJI = {
 };
 
 const HINTS = [
-  { id: '', label: 'No author hint (let the router decide)' },
-  { id: 'whole story', label: 'Whole story' },
-  { id: 'my characters', label: 'My characters' },
-  { id: 'plot & structure', label: 'Plot & structure' },
-  { id: 'the open chapter', label: 'The open chapter' },
-  { id: 'world lore', label: 'World lore' },
-  { id: 'nothing', label: 'Nothing / pure creative' },
+  { id: '', label: 'Let me decide automatically' },
+  { id: 'whole story', label: 'Consider the whole story' },
+  { id: 'my characters', label: 'Focus on my characters' },
+  { id: 'plot & structure', label: 'Focus on plot & structure' },
+  { id: 'the open chapter', label: 'Work with the current chapter' },
+  { id: 'world lore', label: 'Pull in world lore' },
+  { id: 'nothing', label: 'Nothing — pure creative' },
 ];
 
 const mdStyle = {
@@ -93,6 +93,7 @@ export const SkillStudioView = () => {
   const [testJob, setTestJob] = useState(null);
   const [pipelineMsg, setPipelineMsg] = useState('');
   const [showHelp, setShowHelp] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [sources, setSources] = useState([]);
   const [sourceInput, setSourceInput] = useState('');
   const firstLoad = useRef(true);
@@ -150,6 +151,7 @@ export const SkillStudioView = () => {
     setPipelineMsg('');
     setSources([]);
     setSourceInput('');
+    setShowAdvanced(false);
   };
 
   const editDraft = (skill) => {
@@ -447,131 +449,169 @@ export const SkillStudioView = () => {
                     className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] text-[13px] text-[var(--text-main)] font-mono leading-relaxed placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]" />
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div>
-                    <label className="block text-[11px] text-[var(--text-muted)] mb-1">Model family</label>
-                    <select value={draft.model_family} onChange={(e) => patch('model_family', e.target.value)}
-                      className="w-full px-2 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] text-[13px] text-[var(--text-main)] focus:outline-none">
-                      <option value="text">Text</option>
-                      <option value="vision">Vision</option>
-                      <option value="ocr">OCR</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-[var(--text-muted)] mb-1">Temperature</label>
-                    <input type="number" min="0" max="2" step="0.05" value={draft.temperature} onChange={(e) => patch('temperature', parseFloat(e.target.value) || 0)}
-                      className="w-full px-2 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] text-[13px] text-[var(--text-main)] focus:outline-none focus:border-[var(--accent)]" />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-[var(--text-muted)] mb-1">Input kind</label>
-                    <select value={draft.input_kind} onChange={(e) => patch('input_kind', e.target.value)}
-                      className="w-full px-2 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] text-[13px] text-[var(--text-main)] focus:outline-none">
-                      <option value="story_context">Story context</option>
-                      <option value="selection">Selection</option>
-                      <option value="text">Text</option>
-                      <option value="images">Images</option>
-                    </select>
-                  </div>
-                  {draft.input_kind === 'images' ? (
-                    <div>
-                      <label className="block text-[11px] text-[var(--text-muted)] mb-1">Max images</label>
-                      <input type="number" min="1" max="6" value={draft.max_images} onChange={(e) => patch('max_images', parseInt(e.target.value) || 1)}
-                        className="w-full px-2 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] text-[13px] text-[var(--text-main)] focus:outline-none" />
-                    </div>
-                  ) : (
-                    <div className="hidden md:block" />
-                  )}
-                </div>
-
                 <div>
-                  <label className="block text-[11px] text-[var(--text-muted)] mb-1">Show in these views <span className="text-[var(--text-dim)]">(none = everywhere)</span></label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {TABS.map((t) => (
-                      <button key={t.id} onClick={() => toggleTab(t.id)}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all border ${
-                          draft.tabs.includes(t.id)
-                            ? 'bg-[var(--accent-light)] text-[var(--accent)] border-[var(--accent)]'
-                            : 'text-[var(--text-muted)] border-[var(--border-color)] hover:text-[var(--text-main)]'
-                        }`}>
-                        {t.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-base)]/60 p-3">
-                  <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
-                    <div className="flex items-center gap-1.5">
-                      <Globe className="h-3.5 w-3.5 text-[var(--accent)]" />
-                      <span className="text-[11px] font-semibold text-[var(--text-main)]">Data sources (Context Router)</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <select value={draft.hint} onChange={(e) => patch('hint', e.target.value)}
-                        className="px-2 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] text-[11px] text-[var(--text-main)]">
-                        {HINTS.map((h) => <option key={h.id} value={h.id}>{h.label}</option>)}
-                      </select>
-                      <button onClick={previewSources} disabled={previewing || !draft.prompt.trim()}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[var(--border-color)] text-[11px] font-medium text-[var(--accent)] hover:border-[var(--accent)] disabled:opacity-40">
-                        {previewing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />} Preview
-                      </button>
-                    </div>
+                  <label className="block text-[11px] text-[var(--text-muted)] mb-1">What should this skill focus on? <span className="text-[var(--text-dim)]">(guides which story data is used)</span></label>
+                  <div className="flex items-center gap-2">
+                    <select value={draft.hint} onChange={(e) => patch('hint', e.target.value)}
+                      className="flex-1 px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] text-[13px] text-[var(--text-main)] focus:outline-none focus:border-[var(--accent)]">
+                      {HINTS.map((h) => <option key={h.id} value={h.id}>{h.label}</option>)}
+                    </select>
+                    <button onClick={previewSources} disabled={previewing || !draft.prompt.trim()}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[var(--border-color)] text-[12px] font-medium text-[var(--accent)] hover:border-[var(--accent)] disabled:opacity-40 whitespace-nowrap">
+                      {previewing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} Preview
+                    </button>
                   </div>
 
                   {preview && (
-                    <div className="space-y-2 animate-in fade-in">
+                    <div className="mt-2 space-y-1.5 animate-in fade-in">
                       {preview.error && <p className="text-[11px] text-rose-400">{preview.error}</p>}
                       {!preview.error && (
                         <>
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            {preview.params_hint?.length > 0 && preview.params_hint.map((p) => (
-                              <span key={p} className="px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-400 text-[10px] font-mono">param: {p}</span>
-                            ))}
+                            <span className="text-[11px] text-[var(--text-muted)]">Will use:</span>
+                            {sources.length > 0
+                              ? sources.map((s) => <span key={s} className="px-2 py-0.5 rounded-lg bg-[var(--accent-light)] text-[var(--accent)] text-[10px] font-medium">{SOURCE_LABEL[s] || s}</span>)
+                              : <span className="text-[11px] text-[var(--text-dim)]">nothing yet — hit Preview</span>}
                           </div>
                           <p className="text-[10px] text-[var(--text-dim)]">{preview.reason} <span className="text-[var(--accent)]">· routed by {preview.routed_by}</span></p>
                         </>
                       )}
                     </div>
                   )}
-
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {sources.map((s) => (
-                      <span key={s} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--accent-light)] text-[var(--accent)] text-[10px] font-medium">
-                        {SOURCE_LABEL[s] || s}
-                        <button onClick={() => setSources((cur) => cur.filter((x) => x !== s))} className="hover:text-rose-400" aria-label={`Remove ${s}`}>
-                          <X className="h-2.5 w-2.5" />
-                        </button>
-                      </span>
-                    ))}
-                    {sources.length === 0 && <span className="text-[10px] text-[var(--text-dim)]">No data stores yet — preview to route, or add manually.</span>}
-                  </div>
-                  <div className="flex gap-1.5">
-                    <input
-                      value={sourceInput}
-                      onChange={(e) => setSourceInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && sourceInput.trim()) {
-                          e.preventDefault();
-                          setSources((cur) => (cur.includes(sourceInput.trim()) ? cur : [...cur, sourceInput.trim()]));
-                          setSourceInput('');
-                        }
-                      }}
-                      placeholder="Manual source (e.g. overview, plot, arcs, chapter_prose…)"
-                      className="flex-1 px-2 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] text-[11px] text-[var(--text-main)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
-                    />
-                    <button
-                      onClick={() => {
-                        if (sourceInput.trim()) {
-                          setSources((cur) => (cur.includes(sourceInput.trim()) ? cur : [...cur, sourceInput.trim()]));
-                          setSourceInput('');
-                        }
-                      }}
-                      className="px-2 py-1.5 rounded-lg border border-[var(--border-color)] text-[10px] font-medium text-[var(--accent)] hover:border-[var(--accent)]"
-                    >
-                      + Add
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-[var(--text-dim)]">Source vocabulary: {Object.keys(SOURCE_LABEL).join(', ')}. Lock routing to keep manual edits.</p>
                 </div>
+
+                <div className="pt-1">
+                  <button onClick={() => setShowAdvanced((v) => !v)}
+                    className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--accent)] hover:underline">
+                    <span className={`transition-transform ${showAdvanced ? 'rotate-90' : ''}`}>▸</span>
+                    {showAdvanced ? 'Hide advanced options' : 'Advanced options'}
+                  </button>
+                  <p className="text-[10px] text-[var(--text-dim)] mt-0.5 pl-4">Model, temperature, input type, and fine-tune which data feeds the prompt.</p>
+                </div>
+
+                {showAdvanced && (
+                  <div className="space-y-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)]/40 p-3 animate-in fade-in">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div>
+                        <label className="block text-[11px] text-[var(--text-muted)] mb-1">Model family</label>
+                        <select value={draft.model_family} onChange={(e) => patch('model_family', e.target.value)}
+                          className="w-full px-2 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] text-[13px] text-[var(--text-main)] focus:outline-none">
+                          <option value="text">Text</option>
+                          <option value="vision">Vision</option>
+                          <option value="ocr">OCR</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-[var(--text-muted)] mb-1">Temperature</label>
+                        <input type="number" min="0" max="2" step="0.05" value={draft.temperature} onChange={(e) => patch('temperature', parseFloat(e.target.value) || 0)}
+                          className="w-full px-2 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] text-[13px] text-[var(--text-main)] focus:outline-none focus:border-[var(--accent)]" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-[var(--text-muted)] mb-1">Input kind</label>
+                        <select value={draft.input_kind} onChange={(e) => patch('input_kind', e.target.value)}
+                          className="w-full px-2 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] text-[13px] text-[var(--text-main)] focus:outline-none">
+                          <option value="story_context">Story context</option>
+                          <option value="selection">Selection</option>
+                          <option value="text">Text</option>
+                          <option value="images">Images</option>
+                        </select>
+                      </div>
+                      {draft.input_kind === 'images' ? (
+                        <div>
+                          <label className="block text-[11px] text-[var(--text-muted)] mb-1">Max images</label>
+                          <input type="number" min="1" max="6" value={draft.max_images} onChange={(e) => patch('max_images', parseInt(e.target.value) || 1)}
+                            className="w-full px-2 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] text-[13px] text-[var(--text-main)] focus:outline-none" />
+                        </div>
+                      ) : (
+                        <div className="hidden md:block" />
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] text-[var(--text-muted)] mb-1">Show in these views <span className="text-[var(--text-dim)]">(none = everywhere)</span></label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {TABS.map((t) => (
+                          <button key={t.id} onClick={() => toggleTab(t.id)}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all border ${
+                              draft.tabs.includes(t.id)
+                                ? 'bg-[var(--accent-light)] text-[var(--accent)] border-[var(--accent)]'
+                                : 'text-[var(--text-muted)] border-[var(--border-color)] hover:text-[var(--text-main)]'
+                            }`}>
+                            {t.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-3">
+                      <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+                        <div className="flex items-center gap-1.5">
+                          <Globe className="h-3.5 w-3.5 text-[var(--accent)]" />
+                          <span className="text-[11px] font-semibold text-[var(--text-main)]">Data sources (Context Router)</span>
+                        </div>
+                        <button onClick={previewSources} disabled={previewing || !draft.prompt.trim()}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[var(--border-color)] text-[11px] font-medium text-[var(--accent)] hover:border-[var(--accent)] disabled:opacity-40">
+                          {previewing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />} Preview
+                        </button>
+                      </div>
+
+                      {preview && (
+                        <div className="space-y-2 animate-in fade-in">
+                          {preview.error && <p className="text-[11px] text-rose-400">{preview.error}</p>}
+                          {!preview.error && (
+                            <>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {preview.params_hint?.length > 0 && preview.params_hint.map((p) => (
+                                  <span key={p} className="px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-400 text-[10px] font-mono">param: {p}</span>
+                                ))}
+                              </div>
+                              <p className="text-[10px] text-[var(--text-dim)]">{preview.reason} <span className="text-[var(--accent)]">· routed by {preview.routed_by}</span></p>
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {sources.map((s) => (
+                          <span key={s} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--accent-light)] text-[var(--accent)] text-[10px] font-medium">
+                            {SOURCE_LABEL[s] || s}
+                            <button onClick={() => setSources((cur) => cur.filter((x) => x !== s))} className="hover:text-rose-400" aria-label={`Remove ${s}`}>
+                              <X className="h-2.5 w-2.5" />
+                            </button>
+                          </span>
+                        ))}
+                        {sources.length === 0 && <span className="text-[10px] text-[var(--text-dim)]">No data stores yet — preview to route, or add manually.</span>}
+                      </div>
+                      <div className="flex gap-1.5">
+                        <input
+                          value={sourceInput}
+                          onChange={(e) => setSourceInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && sourceInput.trim()) {
+                              e.preventDefault();
+                              setSources((cur) => (cur.includes(sourceInput.trim()) ? cur : [...cur, sourceInput.trim()]));
+                              setSourceInput('');
+                            }
+                          }}
+                          placeholder="Manual source (e.g. overview, plot, arcs, chapter_prose…)"
+                          className="flex-1 px-2 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] text-[11px] text-[var(--text-main)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                        />
+                        <button
+                          onClick={() => {
+                            if (sourceInput.trim()) {
+                              setSources((cur) => (cur.includes(sourceInput.trim()) ? cur : [...cur, sourceInput.trim()]));
+                              setSourceInput('');
+                            }
+                          }}
+                          className="px-2 py-1.5 rounded-lg border border-[var(--border-color)] text-[10px] font-medium text-[var(--accent)] hover:border-[var(--accent)]"
+                        >
+                          + Add
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-[var(--text-dim)]">Source vocabulary: {Object.keys(SOURCE_LABEL).join(', ')}. Lock routing to keep manual edits.</p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="px-4 py-3 border-t border-[var(--border-color)] flex items-center justify-between gap-2 flex-wrap">

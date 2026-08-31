@@ -54,6 +54,125 @@
     --shadow-color: rgba(0, 0, 0, 0.5);
     --font-prose: 'EB Garamond', 'Lora', serif;
   }
+
+  html[data-theme="forest"] {
+    /* Forest Glade (Earthy Greens & Warm Cream) */
+    --bg-base: #f3efe4;
+    --bg-panel: #faf7ec;
+    --bg-card: #ffffff;
+    --bg-hover: #e6ead6;
+    --border-color: #d4dcc0;
+    --border-subtle: #c8d2ae;
+    --text-main: #2f3b2c;
+    --text-muted: #6b7a63;
+    --text-dim: #96a38c;
+    --accent: #4f6f3b;
+    --accent-hover: #3e5a2c;
+    --accent-light: #eefbe2;
+    --shadow-color: rgba(47, 59, 44, 0.08);
+  }
+
+  html[data-theme="obsidian"] {
+    /* Obsidian (Pure Black & Gold) */
+    --bg-base: #0a0a0a;
+    --bg-panel: #121212;
+    --bg-card: #1c1c1c;
+    --bg-hover: #262626;
+    --border-color: #333333;
+    --border-subtle: #242424;
+    --text-main: #f5f0e6;
+    --text-muted: #b3a891;
+    --text-dim: #7a7263;
+    --accent: #d4af37;
+    --accent-hover: #e6c55c;
+    --accent-light: #2a2416;
+    --shadow-color: rgba(0, 0, 0, 0.6);
+  }
+
+  html[data-theme="arsenic"] {
+    /* Arsenic (Dark Academia — Near-Black & Muted Green) */
+    --bg-base: #0e1210;
+    --bg-panel: #151b17;
+    --bg-card: #1d251f;
+    --bg-hover: #263029;
+    --border-color: #334038;
+    --border-subtle: #26312a;
+    --text-main: #e2e8e0;
+    --text-muted: #94a396;
+    --text-dim: #66756a;
+    --accent: #8fb892;
+    --accent-hover: #a9cfa9;
+    --accent-light: #223326;
+    --shadow-color: rgba(0, 0, 0, 0.5);
+  }
+
+  html[data-theme="moonlight"] {
+    /* Moonlight (Cool Blue-White on Charcoal) */
+    --bg-base: #141a24;
+    --bg-panel: #1b2330;
+    --bg-card: #232d3d;
+    --bg-hover: #2b3850;
+    --border-color: #34445c;
+    --border-subtle: #263449;
+    --text-main: #eef2f9;
+    --text-muted: #9fb0c7;
+    --text-dim: #6c7d96;
+    --accent: #8fb6ff;
+    --accent-hover: #a5c6ff;
+    --accent-light: #26344a;
+    --shadow-color: rgba(0, 0, 0, 0.45);
+  }
+
+  html[data-theme="milktea"] {
+    /* Milk Tea (Warm Beige-Brown) */
+    --bg-base: #efe4d5;
+    --bg-panel: #f7ede0;
+    --bg-card: #ffffff;
+    --bg-hover: #e9d5bd;
+    --border-color: #ddc5a8;
+    --border-subtle: #d2b894;
+    --text-main: #4a3826;
+    --text-muted: #8a7364;
+    --text-dim: #a8917f;
+    --accent: #b0703f;
+    --accent-hover: #985c30;
+    --accent-light: #f5e6d3;
+    --shadow-color: rgba(74, 56, 38, 0.08);
+  }
+
+  html[data-theme="crimson"] {
+    /* Crimson Dusk (Deep Burgundy & Warm Highlights) */
+    --bg-base: #150d0d;
+    --bg-panel: #1d1212;
+    --bg-card: #281818;
+    --bg-hover: #342020;
+    --border-color: #4a2b2b;
+    --border-subtle: #371f1f;
+    --text-main: #f7ece6;
+    --text-muted: #c0999c;
+    --text-dim: #8a6469;
+    --accent: #d4586a;
+    --accent-hover: #e66a7c;
+    --accent-light: #3a2025;
+    --shadow-color: rgba(0, 0, 0, 0.5);
+  }
+
+  html[data-theme="sage"] {
+    /* Sage Mist (Soft Sage & Stone) */
+    --bg-base: #eef1eb;
+    --bg-panel: #f4f6f0;
+    --bg-card: #ffffff;
+    --bg-hover: #e2e9dd;
+    --border-color: #d1dbcc;
+    --border-subtle: #c3d1bd;
+    --text-main: #374239;
+    --text-muted: #77856f;
+    --text-dim: #9caa92;
+    --accent: #7a9b78;
+    --accent-hover: #688a66;
+    --accent-light: #e6f0e4;
+    --shadow-color: rgba(55, 66, 57, 0.07);
+  }
 }
 
 body {

@@ -3,6 +3,41 @@
 Every time you change functionality, add a dated entry here summarizing what changed and
 update the relevant section(s) in AGENTS.md.
 
+- **2026-09-01 — Writing Progress (streaks/session stats) dashboard card.**
+  - New backend endpoint `GET /api/stories/{id}/writing-stats` → `WritingStats` model
+    (`total_words`, `total_chapters`, `current_streak`, `longest_streak`, `today_words`,
+    `today_chapters`, `writing_days_total`, `last_active`, `recent_activity[]`).
+  - `backend/app/schemas.py`: added `WritingStats` + `WritingStatsDay` models.
+  - `backend/app/file_manager.py`: new `get_writing_stats(story_slug)` — derives stats from
+    filesystem modification times of chapter `.md` files (no persistent data model). Each
+    chapter's current `word_count` is attributed to the calendar day it was last edited.
+    Computes streaks by scanning the last 90 days; `recent_activity` is the last 14 days.
+  - `frontend/src/components/modules/DashboardView.jsx`: new "Writing Progress" card (placed
+    after the header banner) with 4 metric boxes (total words, current/longest streak,
+    writing days), a 14-day CSS bar chart of daily words, and a "Last active" label. Also
+    converted "Memorable Quotes" into a **sliding single-quote carousel**: shows one random
+    quote at a time, auto-advances to the next every 5s (pausing on hover/while navigating),
+    with Prev/Next buttons, a dot-pager, and a "Paused / Auto-advancing" status label. The
+    quote area has a **fixed height** box: quotes render on a single line (CSS `truncate`
+    ellipsis + hover tooltip) and an Expand/Show-less toggle reveals the full text with
+    scroll inside the same fixed box, so the card never shrinks or grows across quotes of
+    different lengths.
+
+- **2026-09-01 — Expanded aesthetic theme set (10 total).**
+  - Added 7 new themes alongside the existing sepia/midnight/typewriter: `forest` (Forest
+    Glade, light), `obsidian` (Obsidian, dark/gold), `arsenic` (Arsenic, dark academia),
+    `moonlight` (Moonlight, dark/cool-blue), `milktea` (Milk Tea, light/beige), `crimson`
+    (Crimson Dusk, dark/burgundy), `sage` (Sage Mist, light/green).
+  - `frontend/src/index.css`: new `html[data-theme="..."]` blocks each defining the full 14
+    CSS-variable theme set (bg/base/panel/card/hover/border/border-subtle/text-main/muted/dim/
+    accent/accent-hover/accent-light/shadow-color).
+  - `frontend/src/context/ThemeContext.jsx`: `THEMES` array now lists all 10 themes (id/name/
+    mode/description). The Navbar theme dropdown already renders from this array — no Navbar
+    change needed.
+  - `backend/app/schemas.py`: `Story.theme` Literal widened to accept all 10 theme ids (the
+    previous literal included `"paper"`; now matches the frontend `typewriter` literal — see
+    §10 known-issue note about keeping the frontend `typewriter` wording).
+
 - **2026-08-31 — Chapter Interconnectedness Judge (Book Outliner, sub-tab 5).**
   - **Concept:** the writer picks a chapter range **x → y** within a book, writes a custom
     judging prompt (a base prompt is pre-filled and editable per-run with a "Reset to base"

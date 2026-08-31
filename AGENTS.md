@@ -181,6 +181,12 @@ All request/response bodies are typed with Pydantic v2 models. The core entities
   shared plot beat (`book_id`/`book_title`, beat `title`/`description`, optional
   `chapter` as `CharacterMapChapter`). **Derived live** from plot-beat co-occurrence —
   nothing is stored.
+- **Writing stats output (`WritingStats`)** — `total_words`, `total_chapters`,
+  `current_streak`, `longest_streak`, `today_words`, `today_chapters`,
+  `writing_days_total`, `last_active` (ISO or None), `recent_activity[]` (`WritingStatsDay`:
+  `date` `YYYY-MM-DD`, `words`, `chapters`). **Derived live** from chapter `.md` file
+  modification times (no persistent model); each chapter's current `word_count` is
+  attributed to the calendar day it was last edited.
 
 ### 3.2 On-disk JSON structure
 
@@ -273,6 +279,11 @@ arcs, chapters/prose). Key behaviors to maintain:
   characters contributes one interaction between each pair (carrying the book and the
   beat's chapter when `beat.chapter_id` resolves). Edge `weight` = number of shared beats;
   `degree` per node = number of distinct bonds. Single source for the Character Map view.
+- `get_writing_stats(slug)` derives **WritingStats** live from the filesystem modification
+  times of every chapter's `.md` file (no persistent model): groups each chapter's current
+  `word_count` by the calendar day it was last edited, computes current/longest streaks
+  (90-day backward scan), total writing days, and a 14-day `recent_activity` list. Used by
+  the dashboard's "Writing Progress" card.
 
 ### 4.3 `main.py` — FastAPI routes
 
@@ -302,6 +313,9 @@ REST endpoints in `main.py`. The frontend calls these via the Vite dev proxy. Su
 - **Fun facts:** `GET /api/stories/{id}/fun-facts` → `List[str]` of randomizable summary facts
   (counts/spotlights for characters, factions, cities, artifacts, glossary, books, chapters,
   word count, world mechanics). Used by the dashboard's "Summary · Fun Fact" shuffle card.
+- **Writing stats:** `GET /api/stories/{id}/writing-stats` → `WritingStats` (streaks, daily
+  word counts, session stats derived live from chapter file modification times). Used by the
+  dashboard's "Writing Progress" card.
 - **Books:** `GET/POST /api/stories/{id}/books`,
   `GET/PUT/DELETE .../books/{book_id}`,
   `GET/PUT/POST .../books/{book_id}/plot`,

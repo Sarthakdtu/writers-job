@@ -229,6 +229,7 @@ export const CharacterMapView = () => {
   useEffect(() => {
     if (!mapData.nodes.length || !graphRef.current) return;
     graphRef.current.d3Force('link', null);
+    graphRef.current.d3Force('center', null);
   }, [mapData]);
 
   useEffect(() => {

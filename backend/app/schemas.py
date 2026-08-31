@@ -216,13 +216,34 @@ class CharacterMap(BaseModel):
     edges: List[CharacterMapEdge] = Field(default_factory=list)
 
 
+class WritingStatsDay(BaseModel):
+    date: str
+    words: int
+    chapters: int
+
+
+class WritingStats(BaseModel):
+    total_words: int
+    total_chapters: int
+    current_streak: int
+    longest_streak: int
+    today_words: int
+    today_chapters: int
+    writing_days_total: int
+    last_active: Optional[str] = None
+    recent_activity: List[WritingStatsDay] = Field(default_factory=list)
+
+
 class Story(BaseModel):
     id: str
     title: str
     tags: List[str] = Field(default_factory=list)
     background_url: Optional[str] = ""
     background_images: List[str] = Field(default_factory=list)
-    theme: Literal["sepia", "midnight", "paper"] = "sepia"
+    theme: Literal[
+        "sepia", "midnight", "typewriter", "forest", "obsidian",
+        "arsenic", "moonlight", "milktea", "crimson", "sage",
+    ] = "sepia"
     aesthetic_theme: Optional[str] = "sepia"
     background_path: Optional[str] = ""
     google_doc_ids: Dict[str, str] = Field(default_factory=dict)
