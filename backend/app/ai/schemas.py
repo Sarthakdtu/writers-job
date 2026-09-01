@@ -86,6 +86,7 @@ class AIJob(BaseModel):
     progress: float = 0.0
     stage: Optional[str] = None
     queue_position: int = 0
+    archived: bool = False
 
 
 class AIResult(BaseModel):

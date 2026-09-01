@@ -24,9 +24,11 @@ import {
   Trash2,
   Loader2,
   UserRound,
-  UserRoundCog
+  UserRoundCog,
+  Lock
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
+import { useSkillLevel } from '../../context/SkillLevelContext';
 import ReactMarkdown from 'react-markdown';
 import { useEntityMention } from './entityRef/EntityMentionPicker';
 import { withEntityReferences } from './entityRef/EntityReference';
@@ -45,6 +47,7 @@ const markdownComponents = {
 
 export const DraftEditorView = () => {
   const { activeStory, setFocusMode } = useStory();
+  const { canUse } = useSkillLevel();
   const [books, setBooks] = useState([]);
   const [selectedBookId, setSelectedBookId] = useState('');
   const [chapters, setChapters] = useState([]);
@@ -532,17 +535,19 @@ export const DraftEditorView = () => {
             <span>Local Markdown Editor</span>
           </button>
 
-          <button
-            onClick={() => setEditorMode('gdocs')}
-            className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-bold transition-all cursor-pointer ${
-              editorMode === 'gdocs'
-                ? 'bg-[var(--accent)] text-white shadow-xs'
-                : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
-            }`}
-          >
-            <Cloud className="h-3.5 w-3.5" />
-            <span>Google Doc Embed</span>
-          </button>
+          {canUse('editor.gdocs') && (
+            <button
+              onClick={() => setEditorMode('gdocs')}
+              className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-bold transition-all cursor-pointer ${
+                editorMode === 'gdocs'
+                  ? 'bg-[var(--accent)] text-white shadow-xs'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
+              }`}
+            >
+              <Cloud className="h-3.5 w-3.5" />
+              <span>Google Doc Embed</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -663,15 +668,25 @@ export const DraftEditorView = () => {
             </button>
 
             <span className="mx-1 h-5 w-px bg-[var(--border-color)]" />
-            <button
-              onClick={openPerspectiveModal}
-              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white transition-all hover:opacity-90"
-              style={{ backgroundColor: 'var(--accent)' }}
-              title="Rewrite the selected passage from a different point of view (character persona, third person, or narrator)"
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              Rewrite Perspective
-            </button>
+            {canUse('editor.perspective') ? (
+              <button
+                onClick={openPerspectiveModal}
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white transition-all hover:opacity-90"
+                style={{ backgroundColor: 'var(--accent)' }}
+                title="Rewrite the selected passage from a different point of view (character persona, third person, or narrator)"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                Rewrite Perspective
+              </button>
+            ) : (
+              <span
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[var(--text-dim)] border border-dashed border-[var(--border-subtle)] cursor-not-allowed"
+                title="Rewrite Perspective unlocks at Pro level"
+              >
+                <Lock className="h-3.5 w-3.5" />
+                Rewrite Perspective
+              </span>
+            )}
           </div>
 
           {/* Stacked Prose Blocks (note-style: added on top of each other) */}

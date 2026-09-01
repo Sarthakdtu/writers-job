@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
   X, Loader2, Sparkles, AlertCircle, CheckCircle, HelpCircle,
-  ChevronDown, ChevronUp, Play, Pause, FileText, Settings, Zap, RotateCcw, Image as ImageIcon, Trash2,
+  ChevronDown, ChevronUp, Play, Pause, FileText, Settings, Zap, RotateCcw, Image as ImageIcon, Trash2, Lock,
 } from 'lucide-react';
 import { AiHelpModal } from './AiHelpModal';
 import { useStory } from '../context/StoryContext';
+import { useSkillLevel } from '../context/SkillLevelContext';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -49,6 +50,7 @@ const mdStyle = {
 
 export const AIPanel = ({ isOpen, onClose }) => {
   const { activeStory } = useStory();
+  const { canUse } = useSkillLevel();
   const [pipelines, setPipelines] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [config, setConfig] = useState(null);
@@ -61,6 +63,9 @@ export const AIPanel = ({ isOpen, onClose }) => {
   const [libImages, setLibImages] = useState([]);
   const [pickerSkill, setPickerSkill] = useState(null);
   const [allIds, setAllIds] = useState([]);
+  const [runScope, setRunScope] = useState({});
+  const [scopeChars, setScopeChars] = useState([]);
+  const [scopeChapters, setScopeChapters] = useState([]);
 
   const tabs = ['outliner', 'editor', 'world', 'characters', 'dashboard', 'quotes', 'home'];
 
@@ -72,6 +77,7 @@ export const AIPanel = ({ isOpen, onClose }) => {
     fetchPipelines();
     fetchConfig();
     fetchAllIds();
+    fetchScopeData();
     poll();
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -117,6 +123,35 @@ export const AIPanel = ({ isOpen, onClose }) => {
       if (res.ok) setAllIds((await res.json()).map((p) => p.id));
     } catch (err) {
       console.error('Failed to fetch full pipeline list:', err);
+    }
+  };
+
+  const fetchScopeData = async () => {
+    if (!safeStory) return;
+    try {
+      const [charsRes, booksRes] = await Promise.all([
+        fetch(`/api/stories/${safeStory.id}/characters`),
+        fetch(`/api/stories/${safeStory.id}/books`),
+      ]);
+      if (charsRes.ok) setScopeChars(await charsRes.json());
+      if (booksRes.ok) {
+        const books = await booksRes.json();
+        const chs = [];
+        for (const b of (Array.isArray(books) ? books : [])) {
+          try {
+            const cres = await fetch(`/api/stories/${safeStory.id}/books/${b.id}/chapters`);
+            if (cres.ok) {
+              const chapters = await cres.json();
+              for (const ch of (Array.isArray(chapters) ? chapters : [])) {
+                chs.push({ id: ch.id, title: ch.title, bookId: b.id, bookTitle: b.title });
+              }
+            }
+          } catch {}
+        }
+        setScopeChapters(chs);
+      }
+    } catch (err) {
+      console.error('Failed to fetch scope data:', err);
     }
   };
 
@@ -185,10 +220,17 @@ export const AIPanel = ({ isOpen, onClose }) => {
   const runSkill = async (skillId) => {
     if (!safeStory) return;
     const p = pipelines.find((x) => x.id === skillId);
+    const scope = runScope[skillId] || {};
+    const params = {};
+    if (scope.character_id) params.character_id = scope.character_id;
+    if (scope.chapter_id) {
+      params.chapter_id = scope.chapter_id;
+      if (scope.book_id) params.book_id = scope.book_id;
+    }
     const input = {
       text: undefined,
       images: p?.needs_images ? (images[skillId] || []) : [],
-      params: {},
+      params,
     };
     try {
       const res = await fetch('/api/ai/run', {
@@ -217,6 +259,31 @@ export const AIPanel = ({ isOpen, onClose }) => {
   };
 
   if (!isOpen) return null;
+
+  if (!canUse('ai.panel')) {
+    return (
+      <>
+        <div className="fixed inset-0 z-40 bg-black/30 animate-in fade-in" onClick={onClose} />
+        <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[420px] flex-col border-l border-[var(--border-color)] bg-[var(--bg-panel)] backdrop-blur-xl shadow-2xl animate-in slide-in-from-right duration-150">
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--accent-light)] text-[var(--accent)]">
+              <Lock className="h-6 w-6" />
+            </span>
+            <p className="font-prose text-base font-bold text-[var(--text-main)]">The AI Studio is a Pro feature</p>
+            <p className="text-xs text-[var(--text-muted)] max-w-xs">
+              Level up to Pro to unlock every AI pipeline, custom Skill Studio, Chapter Judge and more.
+            </p>
+            <button
+              onClick={onClose}
+              className="mt-2 rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white hover:bg-[var(--accent-hover)]"
+            >
+              Back
+            </button>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   const jobFor = (pipelineId) => jobs.find((j) => j.pipeline === pipelineId);
 
@@ -409,6 +476,40 @@ export const AIPanel = ({ isOpen, onClose }) => {
                             </div>
                           </div>
                         )}
+
+                        {/* Quick Run scope */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider shrink-0">Focus on:</span>
+                          <select
+                            value={runScope[p.id]?.character_id || ''}
+                            onChange={(e) => setRunScope((prev) => ({
+                              ...prev,
+                              [p.id]: { ...prev[p.id], character_id: e.target.value || undefined },
+                            }))}
+                            className="px-2 py-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] text-[11px] text-[var(--text-main)] focus:outline-none focus:border-[var(--accent)] max-w-[140px]"
+                          >
+                            <option value="">All characters</option>
+                            {scopeChars.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                          <select
+                            value={runScope[p.id]?.chapter_id || ''}
+                            onChange={(e) => {
+                              const ch = scopeChapters.find((c) => c.id === e.target.value);
+                              setRunScope((prev) => ({
+                                ...prev,
+                                [p.id]: {
+                                  ...prev[p.id],
+                                  chapter_id: e.target.value || undefined,
+                                  book_id: ch?.bookId || prev[p.id]?.book_id,
+                                },
+                              }));
+                            }}
+                            className="px-2 py-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] text-[11px] text-[var(--text-main)] focus:outline-none focus:border-[var(--accent)] max-w-[140px]"
+                          >
+                            <option value="">All chapters</option>
+                            {scopeChapters.map((ch) => <option key={ch.id} value={ch.id}>{ch.title}</option>)}
+                          </select>
+                        </div>
 
                         {/* run / cancel */}
                         <div className="flex gap-2">

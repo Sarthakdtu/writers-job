@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { CloudUpload, X, Check, RefreshCw, AlertCircle, Sparkles, LogIn, LogOut, User } from 'lucide-react';
+import { CloudUpload, X, Check, RefreshCw, AlertCircle, Sparkles, LogIn, LogOut, User, Download, File, Folder } from 'lucide-react';
 import { useStory } from '../context/StoryContext';
 
 export const GoogleDriveModal = ({ onClose }) => {
@@ -13,6 +13,10 @@ export const GoogleDriveModal = ({ onClose }) => {
   const [syncing, setSyncing] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
+  const [restorePreview, setRestorePreview] = useState(null);
+  const [restoring, setRestoring] = useState(false);
+  const [showRestoreChooser, setShowRestoreChooser] = useState(false);
+  const [availableStories, setAvailableStories] = useState({});
   const oauthPopupRef = useRef(null);
 
   const fetchStatus = async () => {
@@ -121,9 +125,76 @@ export const GoogleDriveModal = ({ onClose }) => {
     }
   };
 
+  const storyTitle = (slug) => {
+    const found = availableStories[slug];
+    return found?.title || slug;
+  };
+
+  const handlePreviewRestore = async () => {
+    try {
+      setRestoring(true);
+      setToastMessage(null);
+      const res = await fetch('/api/backup/restore/preview');
+      if (res.ok) {
+        const data = await res.json();
+        setRestorePreview(data);
+        const titles = {};
+        try {
+          const sres = await fetch('/api/stories');
+          if (sres.ok) {
+            const all = await sres.json();
+            for (const s of all) titles[s.id] = s.title;
+          }
+        } catch (e) { /* ignore */ }
+        setAvailableStories(titles);
+        setShowRestoreChooser(true);
+      } else {
+        const errData = await res.json();
+        setToastMessage(`Restore Preview Error: ${errData.detail}`);
+        setShowRestoreChooser(false);
+      }
+    } catch (err) {
+      console.error('Restore preview failed:', err);
+      setToastMessage('Restore Error: Unable to communicate with server.');
+      setShowRestoreChooser(false);
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const handleExecuteRestore = async (choice) => {
+    try {
+      setRestoring(true);
+      setToastMessage(null);
+      const res = await fetch('/api/backup/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ choice }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const phr = choice === 'drive'
+          ? `Restored ${data.restored_files} file(s) from Drive. ${data.preserved_backups} older local file(s) saved as backup.`
+          : `Kept ${data.skipped_conflicts} local file(s). Created ${data.created_files} new file(s) from Drive.`;
+        setToastMessage(`Done! ${phr}`);
+        setShowRestoreChooser(false);
+        setRestorePreview(null);
+        await refreshGoogleAccount();
+      } else {
+        const errData = await res.json();
+        setToastMessage(`Restore Error: ${errData.detail}`);
+      }
+    } catch (err) {
+      console.error('Restore failed:', err);
+      setToastMessage('Restore Error: Unable to communicate with server.');
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
-      <div className="w-full max-w-lg rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] p-6 shadow-2xl space-y-5">
+      <div className="flex flex-col w-full max-w-lg rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] p-6 shadow-2xl max-h-[90vh]">
         <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-4">
           <div className="flex items-center gap-3">
             <div className="rounded-xl bg-[var(--accent-light)] p-2.5 text-[var(--accent)]">
@@ -144,6 +215,7 @@ export const GoogleDriveModal = ({ onClose }) => {
           </button>
         </div>
 
+        <div className="overflow-y-auto flex-1 space-y-5 py-4">
         {!googleConnected ? (
           <div className="flex flex-col items-center justify-center py-8 space-y-4">
             <div className="rounded-full bg-[var(--bg-base)] p-4 text-[var(--text-muted)]">
@@ -214,6 +286,111 @@ export const GoogleDriveModal = ({ onClose }) => {
                 </div>
               </div>
             </div>
+
+            <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-base)] p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-[var(--text-main)] flex items-center gap-1.5">
+                  <Download className="h-3.5 w-3.5" /> Restore from Drive
+                </span>
+                <button
+                  onClick={handlePreviewRestore}
+                  disabled={restoring}
+                  className="flex items-center gap-1.5 rounded-lg bg-[var(--bg-hover)] px-3 py-1.5 text-[11px] font-semibold text-[var(--text-main)] hover:bg-[var(--border-color)] transition-colors cursor-pointer"
+                >
+                  <Download className={`h-3 w-3 ${restoring ? 'animate-pulse' : ''}`} />
+                  {restoring ? 'Checking...' : 'Check for conflicts'}
+                </button>
+              </div>
+              <p className="text-[11px] leading-relaxed text-[var(--text-muted)]">
+                Download your backed-up stories from Drive back to this device. If a file differs
+                between here and Drive, you'll be asked which version to restore.
+              </p>
+            </div>
+
+            {showRestoreChooser && restorePreview && (
+              <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-base)] p-4 space-y-3 animate-in fade-in">
+                <p className="text-xs font-bold text-[var(--text-main)]">Restore Preview</p>
+                {Object.keys(restorePreview.stories || {}).length === 0 ? (
+                  <p className="text-[11px] text-[var(--text-muted)]">
+                    No story backups found in Drive. Sync to Google Drive first.
+                  </p>
+                ) : (
+                  <>
+                    <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                      {Object.entries(restorePreview.stories).map(([slug, info]) => (
+                        <div key={slug} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-card)] p-2.5">
+                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-[var(--text-main)]">
+                            <Folder className="h-3 w-3 text-[var(--accent)]" />
+                            {storyTitle(slug)}
+                          </div>
+                          <div className="mt-1.5 grid grid-cols-2 gap-1 text-[10px] text-[var(--text-muted)]">
+                            <span className="inline-flex items-center gap-1">
+                              <AlertCircle className="h-3 w-3 text-amber-500" />
+                              {info.conflicts?.length || 0} conflict{info.conflicts?.length === 1 ? '' : 's'}
+                            </span>
+                            <span className="inline-flex items-center gap-1">
+                              <File className="h-3 w-3 text-blue-500" />
+                              {info.remote_only?.length || 0} on Drive only
+                            </span>
+                            <span className="inline-flex items-center gap-1">
+                              <Check className="h-3 w-3 text-emerald-500" />
+                              {info.in_sync?.length || 0} in sync
+                            </span>
+                            <span className="inline-flex items-center gap-1">
+                              <Sparkles className="h-3 w-3 text-[var(--text-dim)]" />
+                              {info.local_only?.length || 0} local only
+                            </span>
+                          </div>
+                          {info.conflicts?.length > 0 && (
+                            <div className="mt-1.5 space-y-0.5">
+                              {info.conflicts.slice(0, 5).map((p) => (
+                                <div key={p} className="truncate text-[10px] font-mono text-amber-600/80">{p}</div>
+                              ))}
+                              {info.conflicts.length > 5 && (
+                                <div className="text-[10px] text-[var(--text-dim)]">+{info.conflicts.length - 5} more</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {restorePreview.total?.conflicts > 0 ? (
+                      <>
+                        <p className="text-[11px] text-amber-600 bg-amber-500/10 rounded-lg p-2.5 border border-amber-500/20">
+                          {restorePreview.total.conflicts} conflicting file(s) found. Choose which version to keep
+                          for all conflicts. The other version is preserved as a local backup until your next sync.
+                        </p>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleExecuteRestore('drive')}
+                            disabled={restoring}
+                            className="flex-1 rounded-lg bg-[var(--accent)] px-3 py-2 text-[11px] font-semibold text-white hover:bg-[var(--accent-hover)] transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            Use Drive version
+                          </button>
+                          <button
+                            onClick={() => handleExecuteRestore('local')}
+                            disabled={restoring}
+                            className="flex-1 rounded-lg border border-[var(--border-color)] px-3 py-2 text-[11px] font-semibold text-[var(--text-main)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            Keep local version
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <button
+                        onClick={() => handleExecuteRestore('drive')}
+                        disabled={restoring}
+                        className="w-full rounded-lg bg-[var(--accent)] px-3 py-2 text-[11px] font-semibold text-white hover:bg-[var(--accent-hover)] transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        {restoring ? 'Restoring...' : 'Restore from Drive'}
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
           </>
         )}
 
@@ -225,6 +402,7 @@ export const GoogleDriveModal = ({ onClose }) => {
             <span>{toastMessage}</span>
           </div>
         )}
+        </div>
 
         <div className="flex justify-end gap-2 pt-2 border-t border-[var(--border-subtle)]">
           <button

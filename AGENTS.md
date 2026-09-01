@@ -45,7 +45,10 @@ writer_job/
 ├── CHANGELOG.md              ← Dated codebase-knowledge update log (moved out of AGENTS.md)
 ├── walkthrough.md            ← Original project walkthrough (architecture diagram + overview)
 ├── requirements.txt          ← Python backend dependencies
-├── plans/                    ← Design drafts (e.g. telegram-integration.md) — NOT implemented code
+├── plans/                    ← Design drafts + features index (see below) — NOT implemented code
+│   ├── features.md           ← Index of implemented vs. planned features (summary + plan refs)
+│   └── implemented/          ← Plan docs moved here once their feature ships
+├── backend/
 ├── backend/
 │   └── app/
 │       ├── main.py           ← FastAPI app + all REST routes
@@ -67,11 +70,19 @@ writer_job/
 │       │   ├── custom.py     ← Custom skill CRUD + duplicate + auto-routing
 │       │   ├── router.py     ← Context Router (LLM + keyword fallback)
 │       │   ├── jobs.py       ← JobManager: FIFO queue, cancel, recover_interrupted
-│       │   ├── notion_enrich.py ← Notion-import Stage C: prose/notes classification + entity extraction via Ollama (design: plans/notion-import-pipeline.md)
+│       │   ├── notion_enrich.py ← Notion-import Stage C: prose/notes classification + entity extraction via Ollama (design: plans/implemented/notion-import-pipeline.md)
+│       │   ├── creator/      ← Creator Pipeline (Pro-tier story import — see §4.7)
+│       │   │   ├── schemas.py   ← Stage-result models + CreatorState/CreatorBatchInfo/CreatorSummary, STAGE_NAMES
+│       │   │   ├── store.py     ← CreatorStore: per-story creator/state.json + batches/<batch>/<stage>.json & <stage>-approved.json
+│       │   │   ├── prompts.py   ← stage_messages() prompts for characters/world/plot/arcs
+│       │   │   ├── split.py     ← split_chapters(): Chapter/Part markers → headings → chunking
+│       │   │   ├── merge.py     ← EntityMerger: append+dedupe merge_characters/world/plot/arcs
+│       │   │   ├── stages.py    ← StageRunner: strict-JSON LLM extraction (retries, null-safe)
+│       │   │   └── pipeline.py  ← CreatorPipeline orchestrator (split → stages → approve/merge)
 │       │   └── __init__.py
 │       └── __init__.py
 │   └── scripts/
-│       └── import_notion.py  ← One-off Notion Markdown exporter → LoreSmith (designed & implemented; Stages A–D incl. Ollama enrichment; design: plans/notion-import-pipeline.md)
+│       └── import_notion.py  ← One-off Notion Markdown exporter → LoreSmith (designed & implemented; Stages A–D incl. Ollama enrichment; design: plans/implemented/notion-import-pipeline.md)
 ├── frontend/
 │   ├── package.json          ← React/Vite deps; scripts: dev, build, lint, preview
 │   ├── vite.config.js        ← dev proxy: /api → http://localhost:8000; VitePWA plugin
@@ -92,7 +103,8 @@ writer_job/
 │           ├── AmbientBackground.jsx   ← story background_url cross-fade layer
 │           ├── GoogleDriveModal.jsx    ← backup status + trigger sync
 │           ├── ArtifactFormModal.jsx   ← shared artifact create/edit modal
-│           ├── AIPanel.jsx             ← ⌘⇧A right-drawer: per-tab skill cards, run/cancel, config, image picker
+│           ├── AIPanel.jsx             ← ⌘⇧A right-drawer: per-tab skill cards, run/cancel, config, image picker,
+│           │                              + per-run "Focus on:" character/chapter scope override (-> input.params)
 │           ├── ExplorerPanel.jsx       ← global bottom-right compass widget + horizontal hover
 │           │                             quick-access bar of the top-5 frequently-used entities (image
 │           │                             avatars, no sidebar). Clicking one shows a popup of its top-3 quick
@@ -111,9 +123,17 @@ writer_job/
 │                                              publishes `loresmith:editor-context` window event
 │                                              (title/sceneBreakdown/prose) when a chapter loads,
 │                                              consumed by ExplorerPanel for relevance ranking
-│               ├── SkillStudioView.jsx      ← Skill Studio (activeTab 'ai'): custom skill CRUD,
-│                                              router preview + editable/lockable source chips,
-│                                              test-run with inline result (react-markdown, no prose plugin)
+│               ├── SkillStudioView.jsx      ← Skill Studio (activeTab 'ai'): custom skill CRUD
+│               │                              with Simple/Advanced progressive toggle + "Start from
+│               │                              template" step, router preview + entity focus picker
+│               │                              (EntityFocusPicker), lock routing, test-run with inline
+│               │                              result (react-markdown, no prose plugin)
+│               ├── EntityFocusPicker.jsx    ← shared entity/focus picker: maps plain-language focus
+│               │                              groups (Characters/Locations/Books... loaded from
+│               │                              /references + /books) to raw routing_sources
+│               ├── CreatorPipelineView.jsx   ← Creator Pipeline (activeTab 'creator', Pro-tier): wizard —
+│               │                              stepper (Split → Characters → World → Plot → Arcs → Done),
+│               │                              paste raw prose, review/edit + approve each extraction stage
 │               └── entityRef/               ← Shared `@`-entity-reference feature
 │                   ├── entityRef.js             ← token parsing/building helpers ([[type:id|label]])
 │                   ├── EntityReference.jsx      ← bold + hover tooltip renderer; withEntityReferences
@@ -129,6 +149,12 @@ writer_job/
 > `plans/` contains **design documents only** (e.g. Telegram integration) — they describe
 > intended future features and are NOT currently implemented. Do not treat them as existing
 > code.
+>
+> **Lifecycle:** when a feature is implemented, move its plan doc to `plans/implemented/`
+> (`git mv plans/<feature>.md plans/implemented/<feature>.md`) and update `plans/features.md`
+> (move the row from **Planned** → **Implemented**) plus `CHANGELOG.md` and any affected
+> `AGENTS.md` sections in the same change. `plans/features.md` is the canonical index of
+> implemented vs. planned features.
 
 ---
 
@@ -332,6 +358,9 @@ REST endpoints in `main.py`. The frontend calls these via the Vite dev proxy. Su
     persisted backup state, so `last_sync_time` survives restarts)
   - `POST /api/backup/google-drive?story_id=` — real recursive Drive backup via
     `GoogleDriveBackupService` (see §4.6)
+  - `GET /api/backup/restore/preview` — conflict classification report (in_sync/conflicts/
+    remote_only/local_only per story)
+  - `POST /api/backup/restore` — restore all stories from Drive (body `{choice}`)
 - **Local AI (Ollama):**
    - `GET /api/ai/status` → `AIStatus` (available, models w/ capabilities,
      default/ocr/vision/router models, error hint, running_jobs, queued_jobs).
@@ -346,6 +375,14 @@ REST endpoints in `main.py`. The frontend calls these via the Vite dev proxy. Su
    - `PUT/DELETE /api/ai/custom/{skill_id}` — update / delete custom skill (purges from all story configs).
    - `POST /api/ai/custom/{skill_id}/duplicate` — duplicate a custom skill.
    - `POST /api/ai/custom/route` — dry-run router (returns `RouterDecision` with `routed_by` badge).
+- **Creator Pipeline (Pro-tier story import — see §4.7):**
+  - `GET /api/creator/{story_id}/state` — pipeline state (`CreatorState`: status, current_batch, current_stage, batches[]).
+  - `POST /api/creator/{story_id}/split` — split pasted raw prose into book + chapters (`CreatorSplitBody`).
+  - `POST /api/creator/{story_id}/run-stage` — run one extraction stage (`CreatorStageBody: {stage}`: characters|world|plot|arcs) and save a draft.
+  - `GET /api/creator/{story_id}/draft/{stage}` — get the current batch's saved draft JSON for review/editing.
+  - `PUT /api/creator/{story_id}/approve/{stage}` — save edits and merge into the story (`CreatorApproveBody: {result}`).
+  - `POST /api/creator/{story_id}/batch` — start a new batch (alias of split for iterative import).
+  - `GET /api/creator/{story_id}/summary` — counts for the Done screen (`CreatorSummary`).
 
 **Backup note:** `POST /api/backup/google-drive` performs a **real upload** to the connected
 account's Drive. `GoogleDriveBackupService` (`backend/app/google_drive_backup.py`) places all
@@ -357,13 +394,22 @@ in `data/stories/.credentials/backup/state.json`. The route still updates the sa
 `_backup_status` shape the frontend expects:
 `{ status, last_sync_time, total_files_synced, error_message }`.
 
+**Restore note:** `GET /api/backup/restore/preview` classifies every tracked file as
+`in_sync`/`conflicts`/`remote_only`/`local_only` (md5 vs Drive md5Checksum). `POST
+/api/backup/restore` with body `{choice: 'drive'|'local'}` restores across **all stories**;
+the choice applies to every conflicting file. `'drive'` overwrites local with the Drive
+version and preserves each overwritten local file under `data/stories/.restore-backup/<slug>/`
+(cleared at the start of each restore). Remote-only files are always created; local-only files
+are never deleted.
+
 ### 4.6 Google Drive backup service (`google_drive_backup.py`)
 - `GoogleDriveBackupService(auth_service, base_data_dir)` — uploads story dirs to the
   connected account's Drive using `auth_service.get_drive_service()`.
 - Key methods: `sync_all_or_story(story_slug, available_slugs)` → `{stories_backed_up,
   files_synced}`; `sync_story(service, story_slug)` syncs one story (uploads new/changed
   files, deletes removed ones); `save_sync_time`/`load_last_sync_time` persist the last sync
-  time across restarts.
+  time across restarts. Restore: `preview_restore()` (per-story conflict classification) and
+  `restore_all(choice)` (`'drive'`/`'local'`).
 - Root folder name constant: `ROOT_FOLDER_NAME = "LoreSmith"`. Skips `.tmp` files. Sync
   does **not** convert Markdown to Google Docs (the old stub wrongly reported
   `markdown_converted_to_docs: True`; the real response reports `False`).
@@ -384,7 +430,7 @@ in `data/stories/.credentials/backup/state.json`. The route still updates the sa
 
 ### 4.5 Ollama AI package (`backend/app/ai/`)
 - Lives as a sub-package; module-level `ollama_client = OllamaClient()` singleton in
-  `main.py`. Design source of truth: `plans/ollama-ai-skills.md` (gated phases 0–7).
+  `main.py`. Design source of truth: `plans/implemented/ollama-ai-skills.md` (gated phases 0–7).
 - `ollama.py` is the **generic transport**: `OllamaRequest`/`OllamaResponse`,
   `detect_capabilities` (families + name heuristics → text/vision/ocr/code),
   `complete()` (OAI-style messages incl. base64 `images`), `resolve_model` (by
@@ -428,16 +474,81 @@ in `data/stories/.credentials/backup/state.json`. The route still updates the sa
 - **Known latency**: on this hardware qwen3.5:9b takes ~20s/completion; LLM-first
   router makes skill creation slow. Use `OLLAMA_ROUTER_MODEL` to point to a faster model.
 
+### 4.7 Creator Pipeline (`backend/app/ai/creator/`) — Pro-tier story import
+
+Separate from the one-shot AI skills: an iterative, review-gated pipeline that turns pasted
+raw prose into a populated story. Source of truth: `plans/implemented/creator-pipeline.md`.
+
+- **Flow:** `split` (no LLM) → 4 extraction stages (`characters`, `world`, `plot`, `arcs`) →
+  user reviews/edits each draft → `approve` merges into the story → next batch. Each stage is
+  independent; the user picks which to run. Closing a batch auto-completes at `arcs`.
+- **Iterative batches:** processing chapters in batches merges via **append + dedupe** (never
+  replace). State persisted under `<story-slug>/creator/` (`CreatorStore`): `state.json` +
+  `batches/<batch>/<stage>.json` (draft) and `<stage>-approved.json` (post-approval copy).
+- **`split.py`:** `split_chapters(text)` → `[(title, content)]`. Preference: explicit
+  `Chapter/Part <N>` markers (with `##` prefix or `—`/`:` titled) → markdown `##` headings →
+  paragraph chunking (~`CHUNK_WORDS`=1500). Chapter titles come from the marker line only
+  (must not swallow body content). Creates a `Book` + `Chapter` per split chapter with the
+  `.md` file saved; `BOOK_ID` = story's first book (`"1"`).
+- **`stages.py`:** `StageRunner` calls Ollama (`format="json"`, `temperature=0.0`,
+  `options.think=false`) pinned to `_CREATOR_MODEL = "qwen2.5:7b"` (fast, not the slow
+  reasoning default). Tolerant parsing with up to 3 retries + `_extract_json` (cleans
+  triple-backtick fences). Null-safe coercion helpers `_s()`/`_sl()` convert `null` string/list values to
+  `""`/`[]` so pydantic stage models never crash on real Ollama output.
+- **`pipeline.py`:** `CreatorPipeline(fm, client, base_data_dir)` orchestrator
+  (`split_text`, async `run_stage`, `approve_stage`, `start_new_batch`, `get_summary`).
+  `_drop_nulls()` recursively strips `None` before building `WorldStageResult/PlotStageResult/
+  ArcsStageResult` from user-edited approvals. Arcs re-ground with already-approved character
+  names. `_merge` routes to `EntityMerger` methods (`merge_characters`/`merge_world`/
+  `merge_plot`/`merge_arcs`).
+- **`merge.py`:** `EntityMerger` appends + dedupes by normalized name (`_norm`). `merge_plot`
+  maps 1-based `chapter_index` → chapter id via the batch's added chapters (`_chapter_id_by_index`).
+- **Routes (`main.py`):** `GET .../state`, `POST .../split`, `POST .../run-stage`,
+  `GET .../draft/{stage}`, `PUT .../approve/{stage}`, `POST .../batch`, `GET .../summary`
+  (see §4.3). `creator_pipeline = CreatorPipeline(file_manager, ollama_client,
+  file_manager.base_data_dir)`.
+- **Frontend:** `CreatorPipelineView.jsx` (activeTab `'creator'`, Pro-gated): wizard stepper
+  Split → Characters → World → Plot → Arcs → Done, a paste pane, per-stage review/edit/approve
+  (`runStage`/`approveStage` POST/PUT the stage), and a Done screen with summary counts.
+
 ---
 
 ## 5. Frontend Architecture
 
 ### 5.1 Provider nesting (`App.jsx`)
-`ThemeProvider` → `StoryProvider` → `MainLayout`. `MainLayout` renders `Navbar`,
-`Sidebar`, `AmbientBackground`, the active module (from `activeTab` switch), the global
-`QuickSearchModal`, `GoogleDriveModal`, the global `ExplorerPanel` (bottom-right widget +
-right-drawer), and the `AIPanel`. **Focus mode** hides the navbar/sidebar; the Explorer
-widget stays visible.
+`ThemeProvider` → `StoryProvider` → `SkillLevelProvider` → `MainLayout`. `MainLayout` renders
+`Navbar`, `Sidebar`, `AmbientBackground`, the active module (from `activeTab` switch), the
+global `QuickSearchModal`, `GoogleDriveModal`, the global `ExplorerPanel` (bottom-right widget
++ right-drawer), and the `AIPanel`. **Focus mode** hides the navbar/sidebar; the Explorer
+widget stays visible (as a locked, non-expanding compass below Intermediate).
+
+#### 5.1.0 Skill Levels (`SkillLevelContext.jsx` + `SkillLevelToggle.jsx`)
+Progressive-unlock "modes" (Beginner → Intermediate → Pro) that progressively reveal features
+so new users aren't overwhelmed. Source of truth:
+- `frontend/src/context/SkillLevelContext.jsx` exposes `SkillLevelProvider`, `useSkillLevel()`,
+  `SKILL_LEVELS` (tier metadata: name/icon/tagline/description/features), `LEVEL_ORDER`
+  (`['beginner','intermediate','pro']`), and `FEATURE_LEVELS` — a map of feature key →
+  minimum tier. Helper `canUse(key)` returns true when the current tier is at/above the tier
+  that unlocks `key`; `featureLevel(key)` / `featureIndex(key)` return the tier/rank. Level is
+  persisted in `localStorage` (`loresmith_skill_level`, default `beginner`).
+- **Modes summary** (defaults; change `FEATURE_LEVELS` to remap):
+  - **Beginner**: Home, Story Dashboard, Character Roster, Draft Editor (Markdown), Quotes,
+    Trash, Quick Search, Themes, Create Story, Drive Backup.
+  - **Intermediate**: Worldbuilding Hub, Book Outliner (Tree + Plot Beats only), Character Map,
+    Universe Explorer, Google Doc editing mode, Focus Mode.
+  - **Pro**: full AI Panel, Skill Studio, Character Arcs, POV Tracker, Chapter Judge,
+    Perspective Rewrite, AI settings, AI image picker.
+- UI: `Navbar.jsx` mounts the compass-anchored `SkillLevelToggle` ascent-trail selector (with a
+  "level up" button and, on first load only, a `SkillLevelModal` onboarding picker shown from
+  `MainLayout`). `Sidebar.jsx` filters `NAV_ITEMS` (each item carries a `feature` key) to the
+  unlocked tier and shows a "locked at tier" teaser. Locked tabs are additionally guarded by
+  the generic `LevelGate` in `App.jsx`, and key views gate their advanced sub-features in-view
+  (AIPanel/SkillStudio Pro-lock screens; BookOutliner hides arcs/POV/judge below Pro;
+  DraftEditor gates Google Docs to Intermediate and shows a locked "Rewrite Perspective" below
+  Pro; ExplorerPanel shows a locked compass below Intermediate). Changing tier triggers the
+  `skill-level-unlock` animation on `<main>` (defined in `index.css`).
+- **Convention:** to gate a new feature behind a tier, add a `FEATURE_LEVELS` entry and call
+  `canUse('your.feature')` at the relevant UI point — `canUse` returns `true` when ungated.
 
 #### 5.1.1 Universe Explorer (`ExplorerPanel.jsx`)
 A self-contained, global component rendered once in `MainLayout` on every tab. A fixed

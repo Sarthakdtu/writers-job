@@ -1,4 +1,6 @@
+import hashlib
 import os
+import shutil
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -46,11 +48,12 @@ class GoogleDriveBackupService:
 
     # --- folder resolution -------------------------------------------------
 
-    def _find_child_folder(self, service, parent_id: str, name: str) -> Optional[str]:
+    def _find_child_folder(self, service, parent_id: Optional[str], name: str) -> Optional[str]:
+        parent = parent_id or "root"
         response = (
             service.files()
             .list(
-                q=f"'{parent_id}' in parents and name='{name}' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+                q=f"'{parent}' in parents and name='{name}' and mimeType='application/vnd.google-apps.folder' and trashed=false",
                 fields="files(id)",
                 spaces="drive",
             )
@@ -59,7 +62,7 @@ class GoogleDriveBackupService:
         files = response.get("files", [])
         return files[0]["id"] if files else None
 
-    def _create_folder(self, service, parent_id: str, name: str) -> str:
+    def _create_folder(self, service, parent_id: Optional[str], name: str) -> str:
         metadata = {
             "name": name,
             "mimeType": "application/vnd.google-apps.folder",
@@ -167,3 +170,195 @@ class GoogleDriveBackupService:
             "stories_backed_up": slugs,
             "files_synced": total,
         }
+
+    # --- restore -----------------------------------------------------------
+
+    def _md5(self, path: Path) -> str:
+        try:
+            hasher = hashlib.md5()
+            with open(path, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    hasher.update(chunk)
+            return hasher.hexdigest()
+        except OSError:
+            return ""
+
+    def _get_drive_file(self, service, file_id: str) -> Optional[Dict]:
+        try:
+            file = (
+                service.files()
+                .get(fileId=file_id, fields="id,name,md5Checksum,modifiedTime")
+                .execute()
+            )
+            return file
+        except Exception:
+            return None
+
+    def _download_drive_file(self, service, file_id: str) -> Optional[bytes]:
+        from googleapiclient.http import MediaIoBaseDownload
+        import io
+
+        try:
+            request = service.files().get_media(fileId=file_id)
+            buf = io.BytesIO()
+            downloader = MediaIoBaseDownload(buf, request)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+            return buf.getvalue()
+        except Exception:
+            return None
+
+    def _remote_manifests(self) -> Dict[str, Dict[str, str]]:
+        """Return {story_slug: {rel_path: file_id}} from the persisted backup manifest."""
+        state = self._load_state()
+        stories = state.get("stories", {})
+        result = {}
+        for slug, st in stories.items():
+            manifest = (st or {}).get("files", {}) or {}
+            if manifest:
+                result[slug] = dict(manifest)
+        return result
+
+    def preview_restore(self) -> Dict:
+        """Compare local files against the Drive backup manifest.
+
+        Returns, per story, which files are in sync, which conflict (local != drive),
+        which are remote-only (present on Drive but not locally), and which are local-only.
+        """
+        service = self.auth_service.get_drive_service()
+        if service is None:
+            raise ConnectionError("Google Drive credentials unavailable or expired.")
+
+        manifests = self._remote_manifests()
+        result = {"stories": {}, "total": {"in_sync": 0, "conflicts": 0, "remote_only": 0, "local_only": 0}}
+
+        for slug, manifest in manifests.items():
+            story_dir = self.base_data_dir / slug
+            in_sync, conflicts, remote_only, local_only = [], [], [], []
+
+            for rel_path, file_id in manifest.items():
+                local_path = story_dir / rel_path
+                drive_file = self._get_drive_file(service, file_id)
+                if drive_file is None:
+                    continue
+
+                local_exists = local_path.exists()
+                drive_md5 = (drive_file.get("md5Checksum") or "").lower()
+                if local_exists:
+                    local_md5 = self._md5(local_path).lower()
+                    if local_md5 and drive_md5 and local_md5 == drive_md5:
+                        in_sync.append(rel_path)
+                    elif not local_md5 or not drive_md5:
+                        conflicts.append(rel_path)
+                    else:
+                        conflicts.append(rel_path)
+                else:
+                    remote_only.append(rel_path)
+
+            if story_dir.exists():
+                for root, dirs, files in os.walk(story_dir):
+                    for file_name in files:
+                        abs_path = Path(root) / file_name
+                        rel = abs_path.relative_to(story_dir).as_posix()
+                        if rel not in manifest:
+                            local_only.append(rel)
+
+            if not any([in_sync, conflicts, remote_only, local_only]):
+                continue
+
+            result["stories"][slug] = {
+                "in_sync": in_sync,
+                "conflicts": conflicts,
+                "remote_only": remote_only,
+                "local_only": local_only,
+            }
+            result["total"]["in_sync"] += len(in_sync)
+            result["total"]["conflicts"] += len(conflicts)
+            result["total"]["remote_only"] += len(remote_only)
+            result["total"]["local_only"] += len(local_only)
+
+        return result
+
+    def restore_all(self, choice: str) -> Dict:
+        """Restore story files from Drive. choice is 'drive' or 'local'.
+
+        Applies to conflicting files only:
+          - 'drive' -> overwrite local with the Drive version (old local is kept as a
+            local backup under .restore-backup/), remote-only files are created.
+          - 'local' -> keep local; remote-only files are still created so no Drive data
+            is lost.
+        local-only files are always preserved.
+        """
+        if choice not in ("drive", "local"):
+            raise ValueError("choice must be 'drive' or 'local'")
+
+        service = self.auth_service.get_drive_service()
+        if service is None:
+            raise ConnectionError("Google Drive credentials unavailable or expired.")
+
+        manifests = self._remote_manifests()
+
+        backup_root = self.base_data_dir / ".restore-backup"
+        if backup_root.exists():
+            shutil.rmtree(backup_root, ignore_errors=True)
+
+        restored_files = 0
+        created_files = 0
+        preserved_backups = 0
+        skipped_conflicts = 0
+
+        for slug, manifest in manifests.items():
+            story_dir = self.base_data_dir / slug
+            story_dir.mkdir(parents=True, exist_ok=True)
+
+            for rel_path, file_id in manifest.items():
+                local_path = story_dir / rel_path
+                drive_file = self._get_drive_file(service, file_id)
+                if drive_file is None:
+                    continue
+
+                local_exists = local_path.exists()
+                drive_md5 = (drive_file.get("md5Checksum") or "").lower()
+                local_md5 = self._md5(local_path).lower() if local_exists else ""
+                differs = not local_exists or not local_md5 or not drive_md5 or local_md5 != drive_md5
+
+                content = self._download_drive_file(service, file_id)
+                if content is None:
+                    continue
+
+                if not local_exists:
+                    self._write_restored(local_path, content)
+                    created_files += 1
+                    continue
+
+                if not differs:
+                    continue
+
+                if choice == "drive":
+                    backup_path = backup_root / slug / rel_path
+                    if local_exists:
+                        backup_path.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(local_path, backup_path)
+                        preserved_backups += 1
+                    self._write_restored(local_path, content)
+                    restored_files += 1
+                else:
+                    skipped_conflicts += 1
+
+        return {
+            "restored_files": restored_files,
+            "created_files": created_files,
+            "preserved_backups": preserved_backups,
+            "skipped_conflicts": skipped_conflicts,
+        }
+
+    @staticmethod
+    def _write_restored(local_path: Path, content: bytes) -> None:
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = local_path.with_name(f".{local_path.name}.restore.tmp")
+        with open(tmp, "wb") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, local_path)

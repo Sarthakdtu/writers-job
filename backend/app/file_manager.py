@@ -7,7 +7,14 @@ from typing import List, Optional, Dict, Any
 
 from app.schemas import (
     Story, Character, WorldMechanics, City, Faction, Artifact, GlossaryTerm, Quote,
-    Book, Chapter, Plot, CharacterArc, WritingStats, WritingStatsDay
+    Book, Chapter, Plot, CharacterArc, WritingStats, WritingStatsDay,
+    StoryInsights, ProductivityInsights, BookProgress, ComprehensionInsights,
+    OrphanedCharacter, PovEntry, FactionCoverage, ArtifactOwnership,
+    GlossarySpread, UnderdevelopedCity, NarrativeInsights, ArcWithoutMilestones,
+    ArcSummary, PlotDensityEntry, CrossBookCharacter, UnusedSubsection,
+    CreativeInsights, MostQuotedCharacter, GalleryCategoryCount, TagCount, InitialCount,
+    RelationshipInsights, MostConnectedCharacter, IsolatedCharacter, StrongestBond,
+    WorldEntitySummary,
 )
 from app.file_utils import (
     read_json_safe, write_json_safe, read_text_safe, write_text_safe, delete_file_safe
@@ -293,6 +300,315 @@ class FileManager:
             writing_days_total=writing_days_total,
             last_active=last_active,
             recent_activity=recent,
+        )
+
+    def get_story_insights(self, story_slug: str) -> StoryInsights:
+        from datetime import datetime as _dt
+        from collections import Counter
+
+        story = self.get_story(story_slug)
+        if not story:
+            return StoryInsights(generated_at=_dt.utcnow().isoformat() + "Z")
+
+        characters = self.list_characters(story_slug)
+        cities = self.get_cities(story_slug)
+        factions = self.get_factions(story_slug)
+        artifacts = self.get_artifacts(story_slug)
+        glossary = self.get_glossary(story_slug)
+        books = self.list_books(story_slug)
+        mech = self.get_world_mechanics(story_slug)
+        char_map = self.get_character_map(story_slug)
+        stats = self.get_writing_stats(story_slug)
+
+        all_chapters: List[Chapter] = []
+        for book in books:
+            all_chapters.extend(self.list_chapters(story_slug, book.id))
+
+        total_chapters = len(all_chapters)
+        chapters_completed = sum(1 for ch in all_chapters if (ch.word_count or 0) > 0)
+
+        # --- Productivity ---
+        books_progress = []
+        for book in books:
+            chs = self.list_chapters(story_slug, book.id)
+            actual = sum(ch.word_count or 0 for ch in chs)
+            target = book.target_word_count or 1
+            percent = round(actual / target * 100, 1) if target > 0 else 0.0
+            books_progress.append(BookProgress(
+                book_id=book.id, title=book.title, target=target, actual=actual, percent=percent,
+            ))
+
+        velocity_7d = 0.0
+        velocity_14d = 0.0
+        velocity_trend = "new"
+        if stats.recent_activity:
+            last_7 = stats.recent_activity[-7:]
+            last_14 = stats.recent_activity
+            days_7 = sum(1 for d in last_7 if d.words > 0) or 1
+            days_14 = sum(1 for d in last_14 if d.words > 0) or 1
+            velocity_7d = round(sum(d.words for d in last_7) / days_7)
+            velocity_14d = round(sum(d.words for d in last_14) / days_14)
+            if velocity_7d > velocity_14d * 1.1:
+                velocity_trend = "up"
+            elif velocity_7d < velocity_14d * 0.9:
+                velocity_trend = "down"
+            else:
+                velocity_trend = "steady"
+
+        days_since = None
+        if stats.last_active:
+            try:
+                last_dt = _dt.fromisoformat(stats.last_active.replace("Z", "+00:00"))
+                days_since = (_dt.now(last_dt.tzinfo) - last_dt).days
+            except Exception:
+                pass
+
+        longest_silent_gap = None
+        if stats.recent_activity:
+            gap = 0
+            max_gap = 0
+            for d in stats.recent_activity:
+                if d.words == 0:
+                    gap += 1
+                    max_gap = max(max_gap, gap)
+                else:
+                    gap = 0
+            longest_silent_gap = max_gap if max_gap > 0 else None
+
+        consistency_score = round(stats.writing_days_total / 90 * 100, 1) if stats.writing_days_total else 0.0
+
+        productivity = ProductivityInsights(
+            books_progress=books_progress,
+            velocity_7d=velocity_7d,
+            velocity_14d=velocity_14d,
+            velocity_trend=velocity_trend,
+            chapters_completed=chapters_completed,
+            chapters_total=total_chapters,
+            days_since_last_session=days_since,
+            longest_silent_gap=longest_silent_gap,
+            consistency_score=consistency_score,
+        )
+
+        # --- Comprehension ---
+        world_count = len(cities) + len(factions)
+        ratio = f"{len(characters)} characters across {world_count} world entities" if world_count else f"{len(characters)} characters, no world entities yet"
+
+        char_ids = {c.id for c in characters}
+        orphaned = []
+        for c in characters:
+            if not c.plot_point_ids and not c.timeline_events and not c.artifact_ids:
+                orphaned.append(OrphanedCharacter(id=c.id, name=c.name))
+
+        pov_counter: Counter = Counter()
+        for ch in all_chapters:
+            if ch.pov_character_id:
+                pov_counter[ch.pov_character_id] += 1
+        char_name_map = {c.id: c.name for c in characters}
+        pov_dist = [PovEntry(character_id=cid, name=char_name_map.get(cid, cid), count=cnt)
+                    for cid, cnt in pov_counter.most_common()]
+
+        faction_cov = []
+        char_locations = {c.location.strip() for c in characters if c.location and c.location.strip()}
+        for f in factions:
+            linked = sum(1 for c in characters if c.location and f.name.lower() in c.location.lower())
+            faction_cov.append(FactionCoverage(id=f.id, name=f.name, linked_characters=linked))
+
+        artifact_own = []
+        for a in artifacts:
+            owners = [char_name_map.get(cid, cid) for cid in a.belongs_to if cid in char_name_map]
+            artifact_own.append(ArtifactOwnership(id=a.id, name=a.name, owners=owners, unowned=len(owners) == 0))
+
+        cat_counter: Counter = Counter()
+        for t in glossary:
+            cat_counter[t.category] += 1
+        gloss_spread = [GlossarySpread(category=cat, count=cnt) for cat, cnt in cat_counter.most_common()]
+
+        chars_with_tl = sum(1 for c in characters if c.timeline_events)
+        chars_without_tl = len(characters) - chars_with_tl
+
+        total_kl = sum(len(c.key_locations) for c in cities)
+        avg_kl = round(total_kl / len(cities), 1) if cities else 0.0
+        under_cities = [UnderdevelopedCity(id=c.id, name=c.name, key_locations_count=len(c.key_locations))
+                        for c in cities if len(c.key_locations) <= 1]
+
+        comprehension = ComprehensionInsights(
+            character_count=len(characters),
+            city_count=len(cities),
+            faction_count=len(factions),
+            character_to_world_ratio=ratio,
+            orphaned_characters=orphaned,
+            pov_distribution=pov_dist,
+            faction_coverage=faction_cov,
+            artifact_ownership=artifact_own,
+            glossary_spread=gloss_spread,
+            world_rules_count=len(mech.global_rules),
+            has_magic_system=bool(mech.magic_system and mech.magic_system.strip()),
+            has_tech_level=bool(mech.technology_level and mech.technology_level.strip()),
+            characters_with_timeline=chars_with_tl,
+            characters_without_timeline=chars_without_tl,
+            avg_key_locations_per_city=avg_kl,
+            underdeveloped_cities=under_cities,
+        )
+
+        # --- Narrative ---
+        all_beats = []
+        for book in books:
+            plot = self.get_plot(story_slug, book.id)
+            all_beats.extend(plot.beats)
+
+        beats_with_ch = sum(1 for b in all_beats if b.chapter_id)
+        beats_no_chars = sum(1 for b in all_beats if not b.character_ids)
+
+        all_arcs = []
+        for book in books:
+            all_arcs.extend(self.get_character_arcs(story_slug, book.id))
+
+        arcs_with_m = sum(1 for a in all_arcs if a.key_milestones)
+        arcs_no_m = [ArcWithoutMilestones(character_id=a.character_id, name=char_name_map.get(a.character_id, a.character_id))
+                     for a in all_arcs if not a.key_milestones]
+        arc_sums = [ArcSummary(character_id=a.character_id, name=char_name_map.get(a.character_id, a.character_id),
+                               from_state=a.starting_state, to_state=a.ending_state)
+                    for a in all_arcs]
+
+        plot_density = []
+        for book in books:
+            chs = self.list_chapters(story_slug, book.id)
+            plot = self.get_plot(story_slug, book.id)
+            bpc = round(len(plot.beats) / len(chs), 1) if chs else 0.0
+            plot_density.append(PlotDensityEntry(book_id=book.id, title=book.title, beats_per_chapter=bpc))
+
+        cross_book = []
+        char_book_counts: Dict[str, set] = {c.id: set() for c in characters}
+        for book in books:
+            for ch in self.list_chapters(story_slug, book.id):
+                if ch.pov_character_id and ch.pov_character_id in char_book_counts:
+                    char_book_counts[ch.pov_character_id].add(book.id)
+            plot = self.get_plot(story_slug, book.id)
+            for beat in plot.beats:
+                for cid in beat.character_ids:
+                    if cid in char_book_counts:
+                        char_book_counts[cid].add(book.id)
+        for cid, bks in char_book_counts.items():
+            if len(bks) > 1:
+                cross_book.append(CrossBookCharacter(
+                    character_id=cid, name=char_name_map.get(cid, cid),
+                    book_count=len(bks), books=sorted(bks),
+                ))
+
+        unused_sub = []
+        for book in books:
+            for sub in book.plot_subsections:
+                has_beat = any(b.title.lower() == sub.title.lower() for b in self.get_plot(story_slug, book.id).beats)
+                if not has_beat:
+                    unused_sub.append(UnusedSubsection(book_id=book.id, book_title=book.title, subsection_title=sub.title))
+
+        narrative = NarrativeInsights(
+            total_beats=len(all_beats),
+            beats_with_chapter=beats_with_ch,
+            beats_without_characters=beats_no_chars,
+            arc_count=len(all_arcs),
+            arcs_with_milestones=arcs_with_m,
+            arcs_without_milestones=arcs_no_m,
+            arc_summaries=arc_sums,
+            plot_density_per_book=plot_density,
+            cross_book_characters=cross_book,
+            unused_subsections=unused_sub,
+        )
+
+        # --- Creative ---
+        char_q_count = sum(len(c.quotes) for c in characters)
+        standalone_q = self.get_quotes(story_slug)
+        total_q = char_q_count + len(standalone_q)
+
+        most_quoted = None
+        if characters:
+            best = max(characters, key=lambda c: len(c.quotes))
+            if best.quotes:
+                most_quoted = MostQuotedCharacter(id=best.id, name=best.name, count=len(best.quotes))
+
+        gallery = self.get_world_section(story_slug, "gallery")
+        gallery_items = gallery if isinstance(gallery, list) else []
+        gallery_total = len(gallery_items)
+        cat_counter2: Counter = Counter()
+        for item in gallery_items:
+            cat = item.get("category") if isinstance(item, dict) else "Concept Art"
+            cat_counter2[cat or "Concept Art"] += 1
+        gallery_cats = [GalleryCategoryCount(category=cat, count=cnt) for cat, cnt in cat_counter2.most_common()]
+
+        all_tags: Counter = Counter()
+        for q in standalone_q:
+            for tag in q.tags:
+                all_tags[tag] += 1
+        top_tags = [TagCount(tag=t, count=c) for t, c in all_tags.most_common(10)]
+
+        initial_counter: Counter = Counter()
+        for c in characters:
+            if c.name:
+                initial_counter[c.name[0].upper()] += 1
+        for c in cities:
+            if c.name:
+                initial_counter[c.name[0].upper()] += 1
+        for f in factions:
+            if f.name:
+                initial_counter[f.name[0].upper()] += 1
+        naming = [InitialCount(letter=l, count=c) for l, c in initial_counter.most_common()]
+
+        creative = CreativeInsights(
+            total_quotes=total_q,
+            character_quotes_count=char_q_count,
+            standalone_quotes_count=len(standalone_q),
+            most_quoted_character=most_quoted,
+            gallery_total=gallery_total,
+            gallery_by_category=gallery_cats,
+            top_tags=top_tags,
+            naming_initials=naming,
+        )
+
+        # --- Relationships ---
+        nodes = char_map.nodes
+        edges = char_map.edges
+        total_possible = len(nodes) * (len(nodes) - 1) / 2 if len(nodes) > 1 else 1
+        density = round(len(edges) / total_possible, 3) if total_possible > 0 else 0.0
+
+        most_connected = None
+        if nodes:
+            best_node = max(nodes, key=lambda n: n.degree)
+            if best_node.degree > 0:
+                most_connected = MostConnectedCharacter(id=best_node.id, name=best_node.name, degree=best_node.degree)
+
+        isolated = [IsolatedCharacter(id=n.id, name=n.name) for n in nodes if n.degree == 0]
+
+        strongest = None
+        if edges:
+            best_edge = max(edges, key=lambda e: e.weight)
+            strongest = StrongestBond(source=best_edge.source, target=best_edge.target, weight=best_edge.weight)
+
+        entity_summary = WorldEntitySummary(
+            characters=len(characters),
+            cities=len(cities),
+            factions=len(factions),
+            artifacts=len(artifacts),
+            glossary=len(glossary),
+            total=len(characters) + len(cities) + len(factions) + len(artifacts) + len(glossary),
+        )
+
+        relationships = RelationshipInsights(
+            total_nodes=len(nodes),
+            total_edges=len(edges),
+            relationship_density=density,
+            most_connected=most_connected,
+            isolated_characters=isolated,
+            strongest_bond=strongest,
+            world_entity_summary=entity_summary,
+        )
+
+        return StoryInsights(
+            productivity=productivity,
+            comprehension=comprehension,
+            narrative=narrative,
+            creative=creative,
+            relationships=relationships,
+            generated_at=_dt.utcnow().isoformat() + "Z",
         )
 
     # --- Asset Operations ---
@@ -860,6 +1176,10 @@ class FileManager:
         prose = read_text_safe(ch_md_path)
         chapter.word_count = len(re.findall(r'\b\w+\b', prose))
 
+        if not chapter.order:
+            existing = self.list_chapters(story_slug, book_id)
+            chapter.order = max([c.order or 0 for c in existing] or [0]) + 1
+
         write_json_safe(ch_json_path, chapter.model_dump())
         return chapter
 
@@ -883,6 +1203,8 @@ class FileManager:
                     chapters.append(Chapter(**data))
                 except Exception as e:
                     print(f"Error parsing chapter {file_path}: {e}")
+        
+        chapters.sort(key=lambda c: (c.order or 0, int((c.id or '0').replace('ch-', '') or '0')))
         return chapters
 
     def delete_chapter(self, story_slug: str, book_id: str, chapter_id: str) -> bool:

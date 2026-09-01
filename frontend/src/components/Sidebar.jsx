@@ -12,25 +12,34 @@ import {
   ChevronRight,
   BookOpen,
   Bot,
-  Trash2
+  Wand2,
+  Trash2,
+  Lock
 } from 'lucide-react';
 import { useStory } from '../context/StoryContext';
+import { useSkillLevel, featureIndex } from '../context/SkillLevelContext';
 
+// Each nav item maps to the skill-level feature key that unlocks it.
 export const NAV_ITEMS = [
-  { id: 'home', label: 'Home', icon: Home, desc: 'All your stories & projects' },
-  { id: 'dashboard', label: 'Story Dashboard', icon: LayoutDashboard, desc: 'Overview, facts & aesthetics' },
-  { id: 'world', label: 'Worldbuilding Hub', icon: Globe, desc: 'Cities, mechanics, factions' },
-  { id: 'characters', label: 'Character Roster', icon: Users, desc: 'Profiles & appearances matrix' },
-  { id: 'charmap', label: 'Character Map', icon: Network, desc: 'Relationship graph & interactions' },
-  { id: 'outliner', label: 'Book Outliner', icon: GitFork, desc: 'Beats, arcs, scene breakdowns' },
-  { id: 'editor', label: 'Draft Editor', icon: FileText, desc: 'Dual-mode Markdown & Google Docs' },
-  { id: 'quotes', label: 'Quotes', icon: Quote, desc: 'Memorable lines, notes & tags' },
-  { id: 'ai', label: 'Skill Studio', icon: Bot, desc: 'Custom skills & AI pipelines' },
-  { id: 'trash', label: 'Trash', icon: Trash2, desc: 'Soft-deleted stories & restore' },
+  { id: 'home', label: 'Home', icon: Home, desc: 'All your stories & projects', feature: 'nav.home' },
+  { id: 'dashboard', label: 'Story Dashboard', icon: LayoutDashboard, desc: 'Overview, facts & aesthetics', feature: 'nav.dashboard' },
+  { id: 'world', label: 'Worldbuilding Hub', icon: Globe, desc: 'Cities, mechanics, factions', feature: 'nav.world' },
+  { id: 'characters', label: 'Character Roster', icon: Users, desc: 'Profiles & appearances matrix', feature: 'nav.characters' },
+  { id: 'charmap', label: 'Character Map', icon: Network, desc: 'Relationship graph & interactions', feature: 'nav.charmap' },
+  { id: 'outliner', label: 'Book Outliner', icon: GitFork, desc: 'Beats, arcs, scene breakdowns', feature: 'nav.outliner' },
+  { id: 'editor', label: 'Draft Editor', icon: FileText, desc: 'Dual-mode Markdown & Google Docs', feature: 'nav.editordraft' },
+  { id: 'quotes', label: 'Quotes', icon: Quote, desc: 'Memorable lines, notes & tags', feature: 'nav.quotes' },
+  { id: 'ai', label: 'Skill Studio', icon: Bot, desc: 'Custom skills & AI pipelines', feature: 'nav.ai' },
+  { id: 'creator', label: 'Creator Pipeline', icon: Wand2, desc: 'Import prose into a story', feature: 'nav.creator' },
+  { id: 'trash', label: 'Trash', icon: Trash2, desc: 'Soft-deleted stories & restore', feature: 'nav.trash' },
 ];
 
 export const Sidebar = () => {
   const { activeTab, setActiveTab, sidebarOpen, setSidebarOpen, activeStory } = useStory();
+  const { rank } = useSkillLevel();
+
+  // Beginner gets a focused set; higher tiers progressively unlock the rest.
+  const visibleItems = NAV_ITEMS.filter((item) => featureIndex(item.feature) <= rank);
 
   return (
     <aside
@@ -64,7 +73,7 @@ export const Sidebar = () => {
 
       {/* Navigation Items */}
       <nav className="flex-1 space-y-1 p-2 overflow-y-auto">
-        {NAV_ITEMS.map((item) => {
+        {visibleItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
           return (
@@ -99,6 +108,26 @@ export const Sidebar = () => {
           );
         })}
       </nav>
+
+      {/* Locked-feature teaser (nudges to level up) */}
+      {sidebarOpen && rank < 2 && (
+        <div className="px-2 pb-1">
+          <div
+            className="flex items-center gap-2 rounded-lg border border-dashed border-[var(--border-subtle)] bg-[var(--bg-base)] px-3 py-2 cursor-pointer hover:border-[var(--accent)] transition-colors"
+            title="Level up to unlock more tools"
+          >
+            <Lock className="h-3.5 w-3.5 shrink-0 text-[var(--text-dim)]" />
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-dim)]">
+                {rank === 0 ? 'Locked at Beginner' : 'Locked at Intermediate'}
+              </div>
+              <div className="truncate text-[10px] text-[var(--text-muted)]">
+                {rank === 0 ? 'Worldbuilding, Outliner, Map, Explorer' : 'AI Studio & Skill Studio'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Sidebar Collapse Toggle */}
       <div className="p-2 border-t border-[var(--border-subtle)] flex justify-end">

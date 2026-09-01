@@ -23,6 +23,10 @@ from app.ai import pipelines as pipelines_mod
 from app.ai import router as router_mod
 from app.ai.store import AiStore
 from app.ai.jobs import JobManager
+from app.ai.creator.pipeline import CreatorPipeline
+from app.ai.creator.schemas import (
+    CreatorState, CreatorSummary, SplitResult,
+)
 
 file_manager = FileManager()
 auth_service = GoogleAuthService(file_manager.base_data_dir)
@@ -30,6 +34,7 @@ backup_service = GoogleDriveBackupService(auth_service, file_manager.base_data_d
 ollama_client = OllamaClient()
 ai_store = AiStore(file_manager.base_data_dir)
 job_manager = JobManager(file_manager, ai_store, file_manager.base_data_dir)
+creator_pipeline = CreatorPipeline(file_manager, ollama_client, file_manager.base_data_dir)
 
 
 @asynccontextmanager
@@ -335,6 +340,23 @@ class ProsePayload(BaseModel):
     content: str
 
 
+class ReorderPayload(BaseModel):
+    chapter_ids: List[str]
+
+
+@app.post("/api/stories/{story_id}/books/{book_id}/chapters/reorder", response_model=List[Chapter])
+def reorder_chapters(story_id: str, book_id: str, payload: ReorderPayload):
+    existing = {ch.id: ch for ch in file_manager.list_chapters(story_id, book_id)}
+    reordered = []
+    for idx, ch_id in enumerate(payload.chapter_ids):
+        if ch_id in existing:
+            ch = existing[ch_id]
+            ch.order = idx + 1
+            file_manager.save_chapter(story_id, book_id, ch)
+            reordered.append(ch)
+    return reordered
+
+
 @app.get("/api/stories/{story_id}/books/{book_id}/chapters/{ch_id}/content")
 @app.get("/api/stories/{story_id}/books/{book_id}/chapters/{ch_id}/prose")
 def read_chapter_content(story_id: str, book_id: str, ch_id: str):
@@ -488,6 +510,41 @@ async def trigger_google_drive_backup(story_id: Optional[str] = None):
         raise HTTPException(status_code=500, detail=f"Google Drive sync failed: {str(e)}")
 
 
+@app.get("/api/backup/restore/preview")
+async def backup_restore_preview():
+    auth_status = auth_service.get_status()
+    if not auth_status.connected:
+        raise HTTPException(
+            status_code=401,
+            detail="No Google account connected. Click 'Connect to Google Drive' first.",
+        )
+    try:
+        return backup_service.preview_restore()
+    except Exception as e:
+        _backup_status["status"] = "error"
+        _backup_status["error_message"] = str(e)
+        raise HTTPException(status_code=500, detail=f"Restore preview failed: {str(e)}")
+
+
+@app.post("/api/backup/restore")
+async def backup_restore(choice: Optional[str] = Body("drive")):
+    auth_status = auth_service.get_status()
+    if not auth_status.connected:
+        raise HTTPException(
+            status_code=401,
+            detail="No Google account connected. Click 'Connect to Google Drive' first.",
+        )
+    if choice not in ("drive", "local"):
+        raise HTTPException(status_code=400, detail="choice must be 'drive' or 'local'")
+    try:
+        result = backup_service.restore_all(choice)
+        return result
+    except Exception as e:
+        _backup_status["status"] = "error"
+        _backup_status["error_message"] = str(e)
+        raise HTTPException(status_code=500, detail=f"Restore failed: {str(e)}")
+
+
 # --- 7. Local AI (Ollama) Endpoints ---
 
 @app.get("/api/ai/status", response_model=AIStatus)
@@ -558,6 +615,7 @@ async def run_ai_pipeline(req: RunRequest):
 
 @app.get("/api/ai/jobs/{story_id}", response_model=List[AIJob])
 async def list_ai_jobs(story_id: str):
+    ai_store.apply_retention(story_id)
     return ai_store.list_jobs(story_id)
 
 
@@ -631,4 +689,78 @@ async def duplicate_custom_skill(skill_id: str):
 @app.post("/api/ai/custom/route", response_model=RouterDecision)
 async def preview_router(req: RouterRequest):
     return await router_mod.route_skill(ollama_client, req.model_dump())
+
+
+# --- Creator Pipeline (Pro-tier story import) --------------------------------
+
+class CreatorSplitBody(BaseModel):
+    text: str
+    book_title: Optional[str] = None
+
+
+class CreatorStageBody(BaseModel):
+    stage: str
+
+
+class CreatorApproveBody(BaseModel):
+    result: Dict[str, Any]
+
+
+@app.get("/api/creator/{story_id}/state", response_model=CreatorState)
+async def creator_state(story_id: str):
+    return creator_pipeline.get_state(story_id)
+
+
+@app.post("/api/creator/{story_id}/split", response_model=CreatorState)
+async def creator_split(story_id: str, body: CreatorSplitBody):
+    try:
+        return creator_pipeline.split_text(story_id, body.text, body.book_title or "")
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/creator/{story_id}/run-stage", response_model=CreatorState)
+async def creator_run_stage(story_id: str, body: CreatorStageBody):
+    try:
+        return await creator_pipeline.run_stage(story_id, body.stage)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/creator/{story_id}/draft/{stage}")
+async def creator_draft(story_id: str, stage: str):
+    state = creator_pipeline.get_state(story_id)
+    if not state.current_batch:
+        raise HTTPException(status_code=400, detail="No active batch. Split text first.")
+    draft = creator_pipeline.store.load_draft(story_id, state.current_batch, stage)
+    if not draft:
+        raise HTTPException(status_code=404, detail=f"No draft for stage '{stage}'")
+    return draft
+
+
+@app.put("/api/creator/{story_id}/approve/{stage}", response_model=CreatorState)
+async def creator_approve(story_id: str, stage: str, body: CreatorApproveBody):
+    try:
+        return creator_pipeline.approve_stage(story_id, stage, body.result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/creator/{story_id}/batch", response_model=CreatorState)
+async def creator_new_batch(story_id: str, body: CreatorSplitBody):
+    try:
+        return creator_pipeline.split_text(story_id, body.text, body.book_title or "")
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/creator/{story_id}/summary", response_model=CreatorSummary)
+async def creator_summary(story_id: str):
+    return creator_pipeline.get_summary(story_id)
 

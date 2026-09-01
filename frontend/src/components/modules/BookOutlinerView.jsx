@@ -14,10 +14,15 @@ import {
   Sparkles,
   Check,
   Loader2,
+  GripVertical,
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
+import { useSkillLevel } from '../../context/SkillLevelContext';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 const markdownComponents = {
   p: ({ children }) => <p className="my-1">{children}</p>,
@@ -42,14 +47,41 @@ const defaultJudgePrompt =
   '## Range verdict\n## Flow & momentum (chapter by chapter)\n## Setups → payoffs\n' +
   '## Threads & character continuity\n## Pacing curve\n## Risks & suggestions';
 
+const CHAPTERS_PER_PAGE = 10;
+
+const SortableChapterCard = ({ ch, children }) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: ch.id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+  return (
+    <div ref={setNodeRef} style={style} className="relative">
+      <div
+        {...attributes}
+        {...listeners}
+        className="absolute left-[-1.5rem] top-1/2 -translate-y-1/2 p-1 cursor-grab text-[var(--text-muted)] hover:text-[var(--accent)]"
+      >
+        <GripVertical className="h-4 w-4" />
+      </div>
+      {children}
+    </div>
+  );
+};
+
 export const BookOutlinerView = () => {
   const { activeStory } = useStory();
+  const { canUse } = useSkillLevel();
   const [books, setBooks] = useState([]);
   const [selectedBook, setSelectedBook] = useState(null);
   const [chapters, setChapters] = useState([]);
   const [plot, setPlot] = useState({ beats: [], theme: '' });
   const [characterArcs, setCharacterArcs] = useState([]);
   const [characters, setCharacters] = useState([]);
+
+  const [activeStoryId] = useState(activeStory?.id || null);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   // Sub-tab selection: 'tree' | 'beats' | 'arcs' | 'pov'
   const [subTab, setSubTab] = useState('tree');
@@ -68,6 +100,9 @@ export const BookOutlinerView = () => {
   const [editingSceneId, setEditingSceneId] = useState(null);
   const [editingSceneText, setEditingSceneText] = useState('');
   const [savingSceneId, setSavingSceneId] = useState(null);
+
+  // Chapter Pagination
+  const [chapterPage, setChapterPage] = useState(0);
 
   // Chapter Judge (sub-tab 5)
   const [judgeStart, setJudgeStart] = useState('');
@@ -256,6 +291,7 @@ export const BookOutlinerView = () => {
     const payload = {
       id: chId,
       title: chapterForm.title,
+      order: existing?.order || chapters.length + 1,
       pov_character_id: chapterForm.pov_character_id || null,
       scene_breakdown: existing?.scene_breakdown || '',
     };
@@ -273,6 +309,27 @@ export const BookOutlinerView = () => {
     } catch (err) {
       console.error('Failed to save chapter:', err);
     }
+  };
+
+  // Reorder Chapters
+  const handleChapterDragEnd = async (event) => {
+    const { active, over } = event;
+    if (!active || !over || active.id === over.id) return;
+
+    setChapters((items) => {
+      const oldIndex = items.findIndex((c) => c.id === active.id);
+      const newIndex = items.findIndex((c) => c.id === over.id);
+      const newItems = arrayMove(items, oldIndex, newIndex);
+      
+      // Persist reorder
+      fetch(`/api/stories/${activeStory.id}/books/${selectedBook.id}/chapters/reorder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chapter_ids: newItems.map((c) => c.id) }),
+      }).catch(console.error);
+
+      return newItems;
+    });
   };
 
   // Save Scene Breakdown (inline)
@@ -481,37 +538,44 @@ export const BookOutlinerView = () => {
                 2. Plot Beats ({plot.beats?.length || 0})
               </button>
 
-              <button
-                onClick={() => setSubTab('arcs')}
-                className={`rounded-xl px-3.5 py-2 text-xs font-semibold transition-all ${
-                  subTab === 'arcs'
-                    ? 'bg-[var(--accent-light)] text-[var(--accent)] border border-[var(--accent)]'
-                    : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]'
-                }`}
-              >
-                3. Character Arcs ({characterArcs.length})
-              </button>
+              {canUse('outliner.arcs') && (
+                <button
+                  onClick={() => setSubTab('arcs')}
+                  className={`rounded-xl px-3.5 py-2 text-xs font-semibold transition-all ${
+                    subTab === 'arcs'
+                      ? 'bg-[var(--accent-light)] text-[var(--accent)] border border-[var(--accent)]'
+                      : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]'
+                  }`}
+                >
+                  3. Character Arcs ({characterArcs.length})
+                </button>
+              )}
 
-              <button
-                onClick={() => setSubTab('pov')}
-                className={`rounded-xl px-3.5 py-2 text-xs font-semibold transition-all ${
-                  subTab === 'pov'
-                    ? 'bg-[var(--accent-light)] text-[var(--accent)] border border-[var(--accent)]'
-                    : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]'
-                }`}
-              >
-                4. POV Tracker
-              </button>
-              <button
-                onClick={() => setSubTab('judge')}
-                className={`rounded-xl px-3.5 py-2 text-xs font-semibold transition-all ${
-                  subTab === 'judge'
-                    ? 'bg-[var(--accent-light)] text-[var(--accent)] border border-[var(--accent)]'
-                    : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]'
-                }`}
-              >
-                5. Chapter Judge
-              </button>
+              {canUse('outliner.pov') && (
+                <button
+                  onClick={() => setSubTab('pov')}
+                  className={`rounded-xl px-3.5 py-2 text-xs font-semibold transition-all ${
+                    subTab === 'pov'
+                      ? 'bg-[var(--accent-light)] text-[var(--accent)] border border-[var(--accent)]'
+                      : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]'
+                  }`}
+                >
+                  4. POV Tracker
+                </button>
+              )}
+
+              {canUse('outliner.judge') && (
+                <button
+                  onClick={() => setSubTab('judge')}
+                  className={`rounded-xl px-3.5 py-2 text-xs font-semibold transition-all ${
+                    subTab === 'judge'
+                      ? 'bg-[var(--accent-light)] text-[var(--accent)] border border-[var(--accent)]'
+                      : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]'
+                  }`}
+                >
+                  5. Chapter Judge
+                </button>
+              )}
             </div>
           </div>
 
@@ -541,114 +605,130 @@ export const BookOutlinerView = () => {
                   </div>
                 )}
 
-                {chapters.map((ch, idx) => {
-                  const povChar = characters.find((c) => c.id === ch.pov_character_id);
-                  return (
-                    <div key={ch.id} className="literary-card rounded-2xl p-5 space-y-3 relative">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="rounded-xl bg-[var(--accent-light)] p-2.5 text-[var(--accent)] font-bold font-mono text-sm">
-                            Ch {ch.id}
-                          </div>
-                          <div>
-                            <h4 className="font-prose text-lg font-bold text-[var(--text-main)]">
-                              {ch.title}
-                            </h4>
-                            <div className="flex items-center gap-2 mt-0.5 text-xs text-[var(--text-muted)]">
-                              <span>Words: <span className="font-mono text-[var(--accent)]">{ch.word_count || 0}</span></span>
-                              {povChar && (
-                                <span className="inline-flex items-center gap-1 rounded-md bg-[var(--accent-light)] px-2 py-0.5 text-[10px] font-bold text-[var(--accent)]">
-                                  <Users className="h-3 w-3" /> POV: {povChar.name}
-                                </span>
+                <DndContext sensors={useSensors(useSensor(PointerSensor))} collisionDetection={closestCenter} onDragEnd={handleChapterDragEnd}>
+                  <SortableContext items={chapters.map(c => c.id)} strategy={verticalListSortingStrategy}>
+                    {chapters.slice(chapterPage * CHAPTERS_PER_PAGE, (chapterPage + 1) * CHAPTERS_PER_PAGE).map((ch, idx) => {
+                      const povChar = characters.find((c) => c.id === ch.pov_character_id);
+                      return (
+                        <SortableChapterCard key={ch.id} ch={ch}>
+                          <div className="literary-card rounded-2xl p-5 space-y-3 relative">
+                            <div className="flex items-start justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="rounded-xl bg-[var(--accent-light)] p-2.5 text-[var(--accent)] font-bold font-mono text-sm">
+                                  Ch {ch.id}
+                                </div>
+                                <div>
+                                  <h4 className="font-prose text-lg font-bold text-[var(--text-main)]">
+                                    {ch.title}
+                                  </h4>
+                                  <div className="flex items-center gap-2 mt-0.5 text-xs text-[var(--text-muted)]">
+                                    <span>Words: <span className="font-mono text-[var(--accent)]">{ch.word_count || 0}</span></span>
+                                    {povChar && (
+                                      <span className="inline-flex items-center gap-1 rounded-md bg-[var(--accent-light)] px-2 py-0.5 text-[10px] font-bold text-[var(--accent)]">
+                                        <Users className="h-3 w-3" /> POV: {povChar.name}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <button
+                                onClick={() => {
+                                  setChapterForm({
+                                    id: ch.id,
+                                    title: ch.title,
+                                    pov_character_id: ch.pov_character_id || '',
+                                  });
+                                  setShowChapterModal(true);
+                                }}
+                                className="p-2 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"
+                              >
+                                <Edit3 className="h-4 w-4" />
+                              </button>
+                            </div>
+
+                            {/* Scene Breakdown (inline editable) */}
+                            <div className="border-t border-[var(--border-subtle)] pt-3 text-xs text-[var(--text-muted)] font-prose leading-relaxed">
+                              <div className="flex items-center justify-between mb-1">
+                                <div className="text-[10px] font-bold uppercase text-[var(--text-dim)]">
+                                  Scene Breakdown
+                                </div>
+                                {editingSceneId === ch.id ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      onClick={() => handleSaveSceneBreakdown(ch)}
+                                      disabled={savingSceneId === ch.id}
+                                      className="flex items-center gap-1 rounded-lg bg-[var(--accent)] px-2.5 py-1 text-[10px] font-bold text-white shadow-xs hover:bg-[var(--accent-hover)] disabled:opacity-50"
+                                    >
+                                      <Check className="h-3 w-3" />
+                                      {savingSceneId === ch.id ? 'Saving...' : 'Save'}
+                                    </button>
+                                    <button
+                                      onClick={() => { setEditingSceneId(null); setEditingSceneText(''); }}
+                                      className="rounded-lg px-2 py-1 text-[10px] font-bold text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => { setEditingSceneId(ch.id); setEditingSceneText(ch.scene_breakdown || ''); }}
+                                    className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"
+                                  >
+                                    <Edit3 className="h-3 w-3" />
+                                    Edit
+                                  </button>
+                                )}
+                              </div>
+                              {editingSceneId === ch.id ? (
+                                <div className="space-y-2">
+                                  <textarea
+                                    rows={4}
+                                    autoFocus
+                                    value={editingSceneText}
+                                    onChange={(e) => setEditingSceneText(e.target.value)}
+                                    placeholder="Scene 1: Aria arrives at the citadel...&#10;Scene 2: Confrontation with the archmage..."
+                                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:outline-hidden font-mono"
+                                  />
+                                  {editingSceneText.trim() && (
+                                    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-card)] px-3 py-2 text-xs text-[var(--text-main)]">
+                                      <div className="text-[10px] font-bold uppercase text-[var(--text-dim)] mb-1">
+                                        Preview
+                                      </div>
+                                      <ReactMarkdown components={markdownComponents}>
+                                        {editingSceneText}
+                                      </ReactMarkdown>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="text-xs text-[var(--text-muted)] font-prose leading-relaxed">
+                                  {ch.scene_breakdown ? (
+                                    <ReactMarkdown components={markdownComponents}>
+                                      {ch.scene_breakdown}
+                                    </ReactMarkdown>
+                                  ) : (
+                                    <p className="text-[var(--text-dim)] italic">No scene breakdown yet — click Edit to plot the scenes.</p>
+                                  )}
+                                </div>
                               )}
                             </div>
                           </div>
-                        </div>
+                        </SortableChapterCard>
+                      );
+                    })}
+                  </SortableContext>
+                </DndContext>
 
-                        <button
-                          onClick={() => {
-                            setChapterForm({
-                              id: ch.id,
-                              title: ch.title,
-                              pov_character_id: ch.pov_character_id || '',
-                            });
-                            setShowChapterModal(true);
-                          }}
-                          className="p-2 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"
-                        >
-                          <Edit3 className="h-4 w-4" />
-                        </button>
-                      </div>
-
-                      {/* Scene Breakdown (inline editable) */}
-                      <div className="border-t border-[var(--border-subtle)] pt-3 text-xs text-[var(--text-muted)] font-prose leading-relaxed">
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="text-[10px] font-bold uppercase text-[var(--text-dim)]">
-                            Scene Breakdown
-                          </div>
-                          {editingSceneId === ch.id ? (
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                onClick={() => handleSaveSceneBreakdown(ch)}
-                                disabled={savingSceneId === ch.id}
-                                className="flex items-center gap-1 rounded-lg bg-[var(--accent)] px-2.5 py-1 text-[10px] font-bold text-white shadow-xs hover:bg-[var(--accent-hover)] disabled:opacity-50"
-                              >
-                                <Check className="h-3 w-3" />
-                                {savingSceneId === ch.id ? 'Saving...' : 'Save'}
-                              </button>
-                              <button
-                                onClick={() => { setEditingSceneId(null); setEditingSceneText(''); }}
-                                className="rounded-lg px-2 py-1 text-[10px] font-bold text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => { setEditingSceneId(ch.id); setEditingSceneText(ch.scene_breakdown || ''); }}
-                              className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"
-                            >
-                              <Edit3 className="h-3 w-3" />
-                              Edit
-                            </button>
-                          )}
-                        </div>
-                        {editingSceneId === ch.id ? (
-                          <div className="space-y-2">
-                            <textarea
-                              rows={4}
-                              autoFocus
-                              value={editingSceneText}
-                              onChange={(e) => setEditingSceneText(e.target.value)}
-                              placeholder="Scene 1: Aria arrives at the citadel...&#10;Scene 2: Confrontation with the archmage..."
-                              className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:outline-hidden font-mono"
-                            />
-                            {editingSceneText.trim() && (
-                              <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-card)] px-3 py-2 text-xs text-[var(--text-main)]">
-                                <div className="text-[10px] font-bold uppercase text-[var(--text-dim)] mb-1">
-                                  Preview
-                                </div>
-                                <ReactMarkdown components={markdownComponents}>
-                                  {editingSceneText}
-                                </ReactMarkdown>
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="text-xs text-[var(--text-muted)] font-prose leading-relaxed">
-                            {ch.scene_breakdown ? (
-                              <ReactMarkdown components={markdownComponents}>
-                                {ch.scene_breakdown}
-                              </ReactMarkdown>
-                            ) : (
-                              <p className="text-[var(--text-dim)] italic">No scene breakdown yet — click Edit to plot the scenes.</p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                {Math.max(1, Math.ceil(chapters.length / CHAPTERS_PER_PAGE)) > 1 && (
+                  <div className="flex items-center gap-1 pt-2 justify-center">
+                    <button onClick={() => setChapterPage(Math.max(0, chapterPage - 1))} disabled={chapterPage === 0}
+                      className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent)] disabled:opacity-30 disabled:cursor-default text-xs">◀</button>
+                    <span className="text-[10px] text-[var(--text-dim)] font-mono">{chapterPage + 1}/{Math.ceil(chapters.length / CHAPTERS_PER_PAGE)}</span>
+                    <button onClick={() => setChapterPage(Math.min(Math.ceil(chapters.length / CHAPTERS_PER_PAGE) - 1, chapterPage + 1))} disabled={chapterPage >= Math.ceil(chapters.length / CHAPTERS_PER_PAGE) - 1}
+                      className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent)] disabled:opacity-30 disabled:cursor-default text-xs">▶</button>
+                  </div>
+                )}
               </div>
             </div>
           )}

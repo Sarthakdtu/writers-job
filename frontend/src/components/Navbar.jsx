@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   BookOpen,
   Sparkles,
@@ -17,6 +18,8 @@ import {
 import { useStory } from '../context/StoryContext';
 import { useTheme } from '../context/ThemeContext';
 import { usePwaInstallPrompt } from '../hooks/usePwaInstallPrompt';
+import { SkillLevelToggle } from './SkillLevelToggle';
+import { useSkillLevel } from '../context/SkillLevelContext';
 
 export const Navbar = ({ onOpenBackupModal }) => {
   const {
@@ -36,6 +39,7 @@ export const Navbar = ({ onOpenBackupModal }) => {
   } = useStory();
 
   const { theme, setTheme, THEMES } = useTheme();
+  const { canUse } = useSkillLevel();
   const { canInstall, isInstalled, promptInstall } = usePwaInstallPrompt();
   const [showStoryDropdown, setShowStoryDropdown] = useState(false);
   const [showThemeDropdown, setShowThemeDropdown] = useState(false);
@@ -237,30 +241,38 @@ export const Navbar = ({ onOpenBackupModal }) => {
             )}
           </button>
 
-          {/* AI Panel Toggle with Status Dot */}
-          <button
-            onClick={() => setAiPanelOpen((prev) => !prev)}
-            className="flex items-center gap-1.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-color)] px-3 py-1.5 text-xs font-semibold text-[var(--text-main)] hover:border-[var(--accent)] hover:bg-[var(--accent-light)] transition-all shadow-xs"
-            title="AI Assistant (Ctrl+Shift+A)"
-          >
-            <Bot className="h-3.5 w-3.5 text-[var(--accent)]" />
-            <span className="hidden sm:inline">AI</span>
-            <span className={`relative h-2 w-2 rounded-full ${aiPanelOpen ? 'bg-emerald-400' : 'bg-[var(--text-dim)]'}`} />
-          </button>
+          {/* AI Panel Toggle with Status Dot (Pro feature) */}
+          {canUse('ai.panel') && (
+            <button
+              onClick={() => setAiPanelOpen((prev) => !prev)}
+              className="flex items-center gap-1.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-color)] px-3 py-1.5 text-xs font-semibold text-[var(--text-main)] hover:border-[var(--accent)] hover:bg-[var(--accent-light)] transition-all shadow-xs"
+              title="AI Assistant (Ctrl+Shift+A)"
+            >
+              <Bot className="h-3.5 w-3.5 text-[var(--accent)]" />
+              <span className="hidden sm:inline">AI</span>
+              <span className={`relative h-2 w-2 rounded-full ${aiPanelOpen ? 'bg-emerald-400' : 'bg-[var(--text-dim)]'}`} />
+            </button>
+          )}
 
-          {/* Distraction-Free Focus Mode Hotkey Toggle */}
-          <button
-            onClick={() => setFocusMode(true)}
-            className="p-1.5 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] transition-colors"
-            title="Focus Mode (Ctrl+Shift+F)"
-          >
-            <Maximize2 className="h-4 w-4" />
-          </button>
+          {/* Skill Level Toggle */}
+          <SkillLevelToggle />
+
+          {/* Distraction-Free Focus Mode Hotkey Toggle (Intermediate feature) */}
+          {canUse('focus.mode') && (
+            <button
+              onClick={() => setFocusMode(true)}
+              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] transition-colors"
+              title="Focus Mode (Ctrl+Shift+F)"
+            >
+              <Maximize2 className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
 
       {/* New Story Modal */}
-      {showNewStoryModal && (
+      {showNewStoryModal &&
+        createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in">
           <div className="w-full max-w-md rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] p-6 shadow-2xl">
             <h3 className="font-prose text-xl font-bold text-[var(--text-main)] mb-1">
@@ -315,7 +327,8 @@ export const Navbar = ({ onOpenBackupModal }) => {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </header>
   );

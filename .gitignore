@@ -6,3 +6,5 @@ node_modules/
 .venv/
 .package-lock.json
 client_secret.json
+package-lock.json
+package.json

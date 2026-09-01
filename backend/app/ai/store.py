@@ -4,6 +4,7 @@ Uses `file_utils` atomic + thread-safe helpers, consistent with the rest of the 
 (a "no raw open()" on data files" rule). Kept out of `FileManager` so bookkeeping
 stays separate from the core story reads.
 """
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -13,6 +14,10 @@ from app.file_utils import read_json_safe, write_json_safe
 
 MAX_JOBS_PER_STORY = 50
 MAX_JOBS_KEPT = 20
+
+ARCHIVE_AGE_S = 24 * 3600        # jobs older than a day → archived flag
+DELETE_AGE_S = 7 * 24 * 3600     # jobs older than a week → deleted
+_TERMINAL = {"done", "error", "cancelled", "interrupted"}
 
 
 class AiStore:
@@ -96,6 +101,34 @@ class AiStore:
                     p.unlink(missing_ok=True)
                 except OSError:
                     pass
+
+    def apply_retention(self, story_id: str) -> Dict[str, int]:
+        """Archive terminal jobs older than a day, delete terminal jobs older than a week.
+
+        Running/pending jobs are never touched. Returns {"archived": n, "deleted": n}.
+        """
+        from app.file_utils import delete_file_safe
+
+        archived = 0
+        deleted = 0
+        now = datetime.now()
+        for p in (self.ai_dir(story_id) / "jobs").glob("*.json"):
+            job = self.read_job(story_id, p.stem)
+            if not job or job.status in {"pending", "running"}:
+                continue
+            try:
+                created = datetime.strptime(job.created_at, "%Y-%m-%dT%H:%M:%S")
+            except (ValueError, TypeError):
+                continue
+            age = (now - created).total_seconds()
+            if age >= DELETE_AGE_S:
+                delete_file_safe(p)
+                deleted += 1
+            elif age >= ARCHIVE_AGE_S and not job.archived:
+                job.archived = True
+                self.write_job(job)
+                archived += 1
+        return {"archived": archived, "deleted": deleted}
 
     # --- results ---
 

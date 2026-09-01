@@ -225,3 +225,37 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-dim);
 }
+
+/* Skill level transitions */
+@keyframes level-unlock {
+  0% {
+    transform: scale(0.9);
+    filter: blur(4px);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.02);
+    filter: blur(0);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes level-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 var(--accent-light);
+  }
+  50% {
+    box-shadow: 0 0 14px 2px var(--accent-light);
+  }
+}
+
+.skill-level-unlock {
+  animation: level-unlock 0.5s ease-out both;
+}
+
+.skill-level-glow {
+  animation: level-glow 2.4s ease-in-out infinite;
+}

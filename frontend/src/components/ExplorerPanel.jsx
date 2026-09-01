@@ -4,6 +4,7 @@ import {
   ChevronRight, StickyNote, Loader2, LayoutGrid,
 } from 'lucide-react';
 import { useStory } from '../context/StoryContext';
+import { useSkillLevel } from '../context/SkillLevelContext';
 import { EntityReferenceText } from './modules/entityRef/EntityReference';
 
 const TYPE_META = {
@@ -52,6 +53,7 @@ const loadUsage = (storyId) => {
 
 export const ExplorerPanel = () => {
   const { activeStory } = useStory();
+  const { canUse } = useSkillLevel();
   const [expanded, setExpanded] = useState(false); // hover-expanded horizontal bar
   const [mode, setMode] = useState(null); // null | 'browse'
   const [query, setQuery] = useState('');
@@ -309,6 +311,19 @@ export const ExplorerPanel = () => {
     setTimeout(() => searchRef.current?.focus(), 60);
   };
 
+  if (!canUse('explorer.panel')) {
+    return (
+      <div className="fixed bottom-4 right-6 z-[75]">
+        <span
+          className="flex h-11 w-11 cursor-not-allowed items-center justify-center rounded-full border border-dashed border-[var(--border-subtle)] bg-[var(--bg-card)]/60 text-[var(--text-dim)]"
+          title="Universe Explorer unlocks at Intermediate level"
+        >
+          <Compass className="h-5 w-5 opacity-60" />
+        </span>
+      </div>
+    );
+  }
+
   return (
     <>
       {/* Compass + horizontal quick-access bar. The whole band is one hover zone:
@@ -316,7 +331,6 @@ export const ExplorerPanel = () => {
           collapses it back. */}
       <div
         className="fixed bottom-4 right-6 z-[75] flex h-[4.5rem] w-[30rem] items-center justify-end gap-2"
-        onMouseEnter={() => setExpanded(true)}
         onMouseLeave={() => setExpanded(false)}
       >
         {/* Backdrop that only appears while a popup is open (click outside to dismiss). */}
@@ -365,6 +379,7 @@ export const ExplorerPanel = () => {
         {/* Circular compass widget (right-most anchor) */}
         <button
           onClick={openBrowse}
+          onMouseEnter={() => setExpanded(true)}
           className="relative z-10 flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-white shadow-2xl hover:bg-[var(--accent-hover)] transition-all cursor-pointer"
           title="Universe Explorer"
         >

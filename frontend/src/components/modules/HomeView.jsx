@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Home as HomeIcon,
   Tag,
@@ -444,7 +445,8 @@ export const HomeView = () => {
       </div>
 
       {/* New Story Modal */}
-      {showCreateModal && (
+      {showCreateModal &&
+        createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in">
           <div className="w-full max-w-md rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] p-6 shadow-2xl space-y-4">
             <h3 className="font-prose text-xl font-bold text-[var(--text-main)]">
@@ -495,7 +497,8 @@ export const HomeView = () => {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

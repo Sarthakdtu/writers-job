@@ -125,6 +125,7 @@ class Book(BaseModel):
 class Chapter(BaseModel):
     id: str
     title: str
+    order: Optional[int] = 0
     pov_character_id: Optional[str] = None
     scene_breakdown: Optional[str] = ""
     markdown_file_path: Optional[str] = ""
@@ -232,6 +233,201 @@ class WritingStats(BaseModel):
     writing_days_total: int
     last_active: Optional[str] = None
     recent_activity: List[WritingStatsDay] = Field(default_factory=list)
+
+
+class BookProgress(BaseModel):
+    book_id: str
+    title: str
+    target: int
+    actual: int
+    percent: float
+
+
+class ProductivityInsights(BaseModel):
+    books_progress: List[BookProgress] = Field(default_factory=list)
+    velocity_7d: float = 0.0
+    velocity_14d: float = 0.0
+    velocity_trend: str = "new"
+    chapters_completed: int = 0
+    chapters_total: int = 0
+    days_since_last_session: Optional[int] = None
+    longest_silent_gap: Optional[int] = None
+    consistency_score: float = 0.0
+
+
+class OrphanedCharacter(BaseModel):
+    id: str
+    name: str
+
+
+class PovEntry(BaseModel):
+    character_id: str
+    name: str
+    count: int
+
+
+class FactionCoverage(BaseModel):
+    id: str
+    name: str
+    linked_characters: int
+
+
+class ArtifactOwnership(BaseModel):
+    id: str
+    name: str
+    owners: List[str] = Field(default_factory=list)
+    unowned: bool = True
+
+
+class GlossarySpread(BaseModel):
+    category: str
+    count: int
+
+
+class UnderdevelopedCity(BaseModel):
+    id: str
+    name: str
+    key_locations_count: int
+
+
+class ComprehensionInsights(BaseModel):
+    character_count: int = 0
+    city_count: int = 0
+    faction_count: int = 0
+    character_to_world_ratio: str = ""
+    orphaned_characters: List[OrphanedCharacter] = Field(default_factory=list)
+    pov_distribution: List[PovEntry] = Field(default_factory=list)
+    faction_coverage: List[FactionCoverage] = Field(default_factory=list)
+    artifact_ownership: List[ArtifactOwnership] = Field(default_factory=list)
+    glossary_spread: List[GlossarySpread] = Field(default_factory=list)
+    world_rules_count: int = 0
+    has_magic_system: bool = False
+    has_tech_level: bool = False
+    characters_with_timeline: int = 0
+    characters_without_timeline: int = 0
+    avg_key_locations_per_city: float = 0.0
+    underdeveloped_cities: List[UnderdevelopedCity] = Field(default_factory=list)
+
+
+class ArcWithoutMilestones(BaseModel):
+    character_id: str
+    name: str
+
+
+class ArcSummary(BaseModel):
+    character_id: str
+    name: str
+    from_state: str
+    to_state: str
+
+
+class PlotDensityEntry(BaseModel):
+    book_id: str
+    title: str
+    beats_per_chapter: float
+
+
+class CrossBookCharacter(BaseModel):
+    character_id: str
+    name: str
+    book_count: int
+    books: List[str] = Field(default_factory=list)
+
+
+class UnusedSubsection(BaseModel):
+    book_id: str
+    book_title: str
+    subsection_title: str
+
+
+class NarrativeInsights(BaseModel):
+    total_beats: int = 0
+    beats_with_chapter: int = 0
+    beats_without_characters: int = 0
+    arc_count: int = 0
+    arcs_with_milestones: int = 0
+    arcs_without_milestones: List[ArcWithoutMilestones] = Field(default_factory=list)
+    arc_summaries: List[ArcSummary] = Field(default_factory=list)
+    plot_density_per_book: List[PlotDensityEntry] = Field(default_factory=list)
+    cross_book_characters: List[CrossBookCharacter] = Field(default_factory=list)
+    unused_subsections: List[UnusedSubsection] = Field(default_factory=list)
+
+
+class MostQuotedCharacter(BaseModel):
+    id: str
+    name: str
+    count: int
+
+
+class GalleryCategoryCount(BaseModel):
+    category: str
+    count: int
+
+
+class TagCount(BaseModel):
+    tag: str
+    count: int
+
+
+class InitialCount(BaseModel):
+    letter: str
+    count: int
+
+
+class CreativeInsights(BaseModel):
+    total_quotes: int = 0
+    character_quotes_count: int = 0
+    standalone_quotes_count: int = 0
+    most_quoted_character: Optional[MostQuotedCharacter] = None
+    gallery_total: int = 0
+    gallery_by_category: List[GalleryCategoryCount] = Field(default_factory=list)
+    top_tags: List[TagCount] = Field(default_factory=list)
+    naming_initials: List[InitialCount] = Field(default_factory=list)
+
+
+class MostConnectedCharacter(BaseModel):
+    id: str
+    name: str
+    degree: int
+
+
+class IsolatedCharacter(BaseModel):
+    id: str
+    name: str
+
+
+class StrongestBond(BaseModel):
+    source: str
+    target: str
+    weight: int
+
+
+class WorldEntitySummary(BaseModel):
+    characters: int = 0
+    cities: int = 0
+    factions: int = 0
+    artifacts: int = 0
+    glossary: int = 0
+    total: int = 0
+
+
+class RelationshipInsights(BaseModel):
+    total_nodes: int = 0
+    total_edges: int = 0
+    relationship_density: float = 0.0
+    most_connected: Optional[MostConnectedCharacter] = None
+    isolated_characters: List[IsolatedCharacter] = Field(default_factory=list)
+    strongest_bond: Optional[StrongestBond] = None
+    world_entity_summary: WorldEntitySummary = Field(default_factory=WorldEntitySummary)
+
+
+class StoryInsights(BaseModel):
+    productivity: ProductivityInsights = Field(default_factory=ProductivityInsights)
+    comprehension: ComprehensionInsights = Field(default_factory=ComprehensionInsights)
+    narrative: NarrativeInsights = Field(default_factory=NarrativeInsights)
+    creative: CreativeInsights = Field(default_factory=CreativeInsights)
+    relationships: RelationshipInsights = Field(default_factory=RelationshipInsights)
+    generated_at: str = ""
 
 
 class GoogleAccount(BaseModel):

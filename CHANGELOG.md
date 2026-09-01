@@ -3,6 +3,134 @@
 Every time you change functionality, add a dated entry here summarizing what changed and
 update the relevant section(s) in AGENTS.md.
 
+- **2026-09-01 — Skill Studio UX polish (icons + job tracker).**
+  - `SkillStudioView.jsx`: custom-skill catalog cards condensed to compact emoji+name tiles
+    (description moved to title tooltip). Built-in skills list replaced by a search box +
+    horizontally scrollable symbol strip; clicking a symbol shows its name/description.
+  - Added a "Job tracker" left-column section: live list of all AI jobs for the active
+    story (newest first) with status badges, elapsed/queue/model info, progress bar,
+    cancel button, and click-to-expand markdown result.
+  - Job retention: `AIJob.archived` flag (default False) + `AiStore.apply_retention()`
+    — terminal jobs older than 24h get archived, older than 7 days are deleted
+    (running/pending never touched). Runs on every `GET /api/ai/jobs/{story_id}`.
+    Job tracker shows an "archived" badge + age ("Nd ago") and dims archived rows.
+  - Selecting a job row now opens a right-side detail drawer (`JobDetailDrawer`) with the
+    job's status/model/timing/chips, progress, cancel button, error, and the markdown
+    response (fetched from `/results`); archived jobs are shown grayscale/dimmed.
+  - Job tracker is paginated (5 jobs per page, prev/next controls) and groups each page's
+    jobs under their skill (emoji + name + per-group count).
+
+- **2026-09-01 — AI Skills: Beginner-Friendly UX Overhaul.**
+  - `frontend/src/components/EntityFocusPicker.jsx` (new): entity/focus picker that maps
+    plain-language groups (Characters, Locations, Factions, Artifacts, Books...) to raw
+    `routing_sources` (`characters`, `world_cities`, `books`...). Loads story references
+    (`/references`) and books (`/books`) to show real named entities.
+  - `frontend/src/components/modules/SkillStudioView.jsx`: progressive disclosure — simple
+    mode (Name/Description/Prompt/Focus dropdown) is default; "Advanced options" toggle
+    reveals model family, temperature, input kind, max images, tab restrictions, the
+    entity focus picker (replacing the raw source-chip + manual-input editor), and lock
+    routing. Added a "Start from template" step (Character Analyst, World Consistency,
+    Chapter Editor, Image Describer) shown on new skill create. Added inline help text
+    under Model family / Temperature / Input kind fields.
+  - `frontend/src/components/AIPanel.jsx`: added a "Focus on:" per-run scope override on
+    expanded skill cards — character + chapter pickers that map to `input.params`
+    (`character_id`, `chapter_id`, `book_id`) on the `RunRequest`.
+  - Design doc moved to `plans/implemented/ai-ux-simplification.md`.
+
+- **2026-09-01 — Creator Pipeline: Story Import from Raw Prose (Pro-tier).**
+  - Backend `backend/app/ai/creator/` (independent of the one-shot AI skills): `schemas.py`
+    (stage-result + `CreatorState`/`CreatorBatchInfo`/`CreatorSummary` models, `STAGE_NAMES`),
+    `store.py` (`CreatorStore` — per-story `creator/state.json` + `batches/<batch>/<stage>.json`
+    and `<stage>-approved.json`), `prompts.py`, `split.py` (`split_chapters` — explicit
+    `Chapter/Part` markers → markdown headings → word-count chunking; titles no longer swallow
+    body content), `stages.py` (`StageRunner` — strict JSON extraction w/ 3 retries, null-safe
+    `_s`/`_sl` coercion, pinned `_CREATOR_MODEL = "qwen2.5:7b"`, temp 0, `think:false`,
+    `format:"json"`), `merge.py` (`EntityMerger` — append+dedupe `merge_characters`/`merge_world`/
+    `merge_plot`/`merge_arcs`), `pipeline.py` (`CreatorPipeline` orchestrator: split → 4 extraction
+    stages → approve/merge → next batch, iterative merge across batches; `_drop_nulls` guards
+    pydantic stage models against null user edits).
+  - Routes in `backend/app/main.py`: `GET /api/creator/{story_id}/state`; `POST .../split`;
+    `POST .../run-stage`; `GET .../draft/{stage}`; `PUT .../approve/{stage}`; `POST .../batch`;
+    `GET .../summary`. `creator_pipeline` instantiated once (uses `file_manager.base_data_dir`).
+  - Frontend: new `CreatorPipelineView.jsx` wizard (stepper: Split → Characters → World → Plot →
+    Arcs → Done) mounted as `activeTab 'creator'` in `App.jsx` behind a `LevelGate`; `Sidebar.jsx`
+    `NAV_ITEM 'creator'` (Wand2 icon, `feature: 'nav.creator'`); `SkillLevelContext.jsx`
+    `FEATURE_LEVELS` adds `'nav.creator': 'pro'` + `'creator.pipeline': 'pro'`.
+  - Plan doc moved `plans/creator-pipeline.md` → `plans/implemented/creator-pipeline.md`;
+    `plans/features.md` moved the row from **Planned** → **Implemented**.
+  - Verified: `PYTHONPATH=backend` imports; splitter unit checks (markdown/bare/titled/roman
+    chapter markers + chunking); full merge cycle over the HTTP contract (characters/world/plot/
+    arcs → `status: complete`); `npm run build` passes (note: repo has no ESLint config, so
+    `npm run lint` errors — use `npm run build` to verify frontend). Live LLM extraction not
+    smoke-tested (requires Ollama running).
+
+- **2026-09-01 — Features index + plan lifecycle (`plans/features.md`, `plans/implemented/`).**
+  - New `plans/features.md` is the canonical index of **implemented** vs **planned** features,
+    each with a summary and a reference to its plan doc (or implementation).
+  - New `plans/implemented/` directory holds plan docs whose features have shipped. Moved
+    `ollama-ai-skills.md`, `notion-import-pipeline.md`, `google-signin-implementation.md`, and
+    `google-drive-sync.md` there (all implemented).
+  - `AGENTS.md` now documents the lifecycle rule: when a feature is implemented, `git mv` its
+    plan doc to `plans/implemented/`, update `plans/features.md` (Planned → Implemented),
+    `CHANGELOG.md`, and any affected `AGENTS.md` sections in the same change.
+  - Added `plans/creator-pipeline.md` (design phase) — a Pro-tier story-import pipeline that
+    ingests pasted raw prose and extracts characters/world/plot/arcs iteratively across batches.
+
+- **2026-09-01 — Skill Levels (Beginner / Intermediate / Pro) progressive-unlock modes.**
+  - New `frontend/src/context/SkillLevelContext.jsx`: `SkillLevelProvider`, `useSkillLevel()`,
+    `SKILL_LEVELS`, `LEVEL_ORDER`, and `FEATURE_LEVELS` — a declarative feature→tier map where
+    each feature key (`nav.home`, `nav.world`, `nav.ai`, `outliner.judge`, `editor.perspective`,
+    etc.) maps to a minimum tier (`beginner|intermediate|pro`). `canUse(key)` returns true when
+    the current tier is at/above the required tier. Level is persisted in `localStorage`
+    (`loresmith_skill_level`, default `beginner`) and exposed with helpers `featureLevel`,
+    `featureIndex`.
+  - New `frontend/src/components/SkillLevelToggle.jsx`: a compass-anchored ascent-trail
+    selector (three tier icons on an animated progress line) in the Navbar, plus a one-time
+    onboarding modal (`SkillLevelModal`) that lets users pick a tier and inspect each tier's
+    feature roster. The modal shows on first load (`loresmith_skill_level_seen` flag).
+  - `frontend/src/App.jsx` nests `SkillLevelProvider` (inside `StoryProvider`) and renders the
+    onboarding modal once; a generic `LevelGate` wrapper guards locked tabs (world/charmap/
+    outliner/ai) so they can't be reached from lower tiers, and the `<main>` content area
+    applies a `skill-level-unlock` animation on tier change.
+  - `frontend/src/components/Sidebar.jsx`: `NAV_ITEMS` each carry a `feature` key; the nav
+    filters items to those unlocked at the current tier, plus a "locked at tier" hint card to
+    nudge upgrades.
+  - `frontend/src/components/Navbar.jsx`: mounts `SkillLevelToggle`; the AI Panel button is
+    Pro-gated and the Focus Mode button is Intermediate-gated (both hidden below their tier).
+  - In-panel gates: `AIPanel.jsx` and `SkillStudioView.jsx` show a Pro-lock screen below Pro;
+    `BookOutlinerView.jsx` hides Character Arcs / POV Tracker / Chapter Judge sub-tabs below Pro
+    (tree + beats stay at Intermediate); `DraftEditorView.jsx` gates Google Doc Embed to
+    Intermediate and shows a locked "Rewrite Perspective" control below Pro;
+    `ExplorerPanel.jsx` shows a locked (non-expanding) compass below Intermediate.
+  - `frontend/src/index.css` adds `skill-level-unlock` and `skill-level-glow` keyframe utilities.
+  - Feature→tier map (default): Beginner = Home, Story Dashboard, Character Roster, Draft Editor
+    (Markdown), Quotes, Trash, quick search, themes, create story, Drive backup. Intermediate =
+    + Worldbuilding Hub, Book Outliner (tree + plot beats only), Character Map, Universe
+    Explorer, Google Doc editing mode, Focus Mode. Pro = + full AI Panel, Skill Studio, Character
+    Arcs, POV Tracker, Chapter Judge, Perspective Rewrite, AI settings & image picker.
+
+- **2026-09-01 — Restore from Google Drive (with per-story conflict resolution).**
+  - `backend/app/google_drive_backup.py` gains a restore engine: `preview_restore()` and
+    `restore_all(choice)`.
+  - `preview_restore()` walks per-story manifests (rel_path → Drive file id) from the persisted
+    backup state and classifies each file as `in_sync`, `conflicts` (local md5 ≠ Drive
+    md5Checksum), `remote_only` (on Drive but not local), or `local_only` (local but not tracked).
+    Returns `{ stories: {slug: {in_sync, conflicts, remote_only, local_only}}, total }`.
+  - `restore_all(choice)`; `choice` is `'drive'` or `'local'`, applied to all conflicting files:
+    - `'drive'` → downloads the Drive version over local, preserving each overwritten local
+      file under `data/stories/.restore-backup/<slug>/<rel_path>` (the backup folder is cleared
+      at the start of each restore so it reflects the most recent restore). Remote-only files
+      are created; local-only files are kept.
+    - `'local'` → keeps local versions of conflicts; remote-only files are still created so no
+      Drive data is lost.
+  - `main.py`: new routes `GET /api/backup/restore/preview` and `POST /api/backup/restore`
+    (body `{choice}`).
+  - `frontend/src/components/GoogleDriveModal.jsx`: new "Restore from Drive" card with a
+    "Check for conflicts" button that loads the preview, shows a per-story summary (conflicts /
+    Drive-only / in-sync / local-only + conflict file list), and asks once whether to "Use Drive
+    version" or "Keep local version" for all conflicts. Modal content made scrollable
+    (`max-h-[90vh]`, `overflow-y-auto`) to fit the added panel.
+
 - **2026-09-01 — Real Google Drive backup (replaces the count-only stub).**
   - New module `backend/app/google_drive_backup.py` — `GoogleDriveBackupService` actually
     uploads story files (JSON, Markdown, assets) to the connected Google account's Drive
