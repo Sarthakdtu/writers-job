@@ -19,6 +19,7 @@ from app.ai import pipelines as pipeline_registry
 from app.ai import prompts as prompt_mod
 from app.ai import router as router_mod
 from app.ai.io import prepare_images
+from app.ai import generator as generator_mod
 from app.ai.ollama import (
     OllamaClient,
     OllamaError,
@@ -275,9 +276,32 @@ class JobManager:
             for idx, step in enumerate(pipeline.steps):
                 job.steps_done = idx
                 job.stage = prompt_mod.STAGE_LABELS.get(step.prompt_key, "Asking the editor…")
-                model_name = await self._resolve_step_model(step, pipeline, cfg, models)
-                job.model = model_name
+                if getattr(step, "kind", "llm") == "llm":
+                    model_name = await self._resolve_step_model(step, pipeline, cfg, models)
+                    job.model = model_name
+                else:
+                    job.model = "Juggernaut XL"
                 self.store.write_job(job)
+
+                if getattr(step, "kind", "llm") == "generate":
+                    # Local diffusion generation (Juggernaut XL): craft from prev_output
+                    if not prev_output:
+                        raise OllamaError("The image prompt step produced no text to generate from.")
+                    art_path = await generator_mod.generate_image(prev_output)
+                    url = self.fm.save_asset(story_id, art_path.read_bytes(), "chapter_art.png")
+                    if pipeline.id == "chapter_art":
+                        book_id = params.get("book_id")
+                        chapter_id = params.get("chapter_id")
+                        if book_id and chapter_id:
+                            self.fm.set_chapter_image_url(story_id, book_id, chapter_id, url)
+                    if url:
+                        prev_output = url
+                        final_output = f"![Chapter illustration]({url})"
+                    job.result_path = str(self.store.result_path(story_id, job.pipeline))
+                    job.steps_done = idx + 1
+                    job.progress = job.steps_done / max(job.steps_total, 1)
+                    self.store.write_job(job)
+                    continue
 
                 custom_prompt = custom_skill.prompt if custom_skill else None
                 selection = ""
@@ -302,9 +326,16 @@ class JobManager:
                         f"{custom_skill.prompt}\n\nText:\n{run_input.text}"
                     )
 
+                attach_images = images_b64 if step.model_family in ("vision", "ocr") else []
+                req_messages = [
+                    OllamaMessage(**m) for m in messages
+                ]
+                if attach_images and req_messages:
+                    req_messages[-1].images = attach_images
+
                 resp = await self.client.complete(OllamaRequest(
                     model=model_name,
-                    messages=[OllamaMessage(**m) for m in messages],
+                    messages=req_messages,
                     temperature=step.temperature if step.temperature is not None else pipeline.temperature,
                     num_predict=step.num_predict,
                     format=step.format,
@@ -313,7 +344,14 @@ class JobManager:
                     },
                 ))
                 if resp.error:
-                    raise OllamaError(resp.error)
+                    err = resp.error
+                    if "does not support image" in err or "Cannot read" in err:
+                        err = (
+                            f"The model '{model_name}' does not support image input. "
+                            "Switch to a vision model (e.g. minicpm-v, llava) in AI Settings, "
+                            "or remove the attached images and try again."
+                        )
+                    raise OllamaError(err)
                 content = resp.content.strip()
                 if content:
                     prev_output = content

@@ -10,8 +10,6 @@ import {
   Plus,
   Trash2,
   Edit3,
-  Save,
-  Check,
   Sparkles,
   Upload,
   Link as LinkIcon,
@@ -26,6 +24,7 @@ import { useStory } from '../../context/StoryContext';
 import { ArtifactFormModal } from '../ArtifactFormModal';
 import { useEntityMention } from './entityRef/EntityMentionPicker';
 import { EntityReferenceText } from './entityRef/EntityReference';
+import { trackRecentEdit } from '../../utils/recentlyEdited';
 
 export const WorldbuildingView = () => {
   const { activeStory } = useStory();
@@ -54,7 +53,7 @@ export const WorldbuildingView = () => {
 
   // Form states for items
   const [cityForm, setCityForm] = useState({ id: '', name: '', region: '', atmosphere: '', image_url: '', key_locations: '' });
-  const [mechanicsForm, setMechanicsForm] = useState({ magic_system: '', technology_level: '', global_rules: '' });
+  const [mechanicsForm, setMechanicsForm] = useState({ id: '', name: '', magic_system: '', technology_level: '', global_rules: '' });
   const [factionForm, setFactionForm] = useState({ id: '', name: '', description: '', leader: '', alignment: '' });
   const [glossaryForm, setGlossaryForm] = useState({ id: '', term: '', definition: '', category: '' });
   const [galleryForm, setGalleryForm] = useState({ id: '', title: '', image_url: '', context: '', category: 'Concept Art', tags: '' });
@@ -76,13 +75,6 @@ export const WorldbuildingView = () => {
       if (res.ok) {
         const json = await res.json();
         setData(json);
-        if (activeSection === 'mechanics' && json) {
-          setMechanicsForm({
-            magic_system: json.magic_system || '',
-            technology_level: json.technology_level || '',
-            global_rules: (json.global_rules || []).join('\n'),
-          });
-        }
       }
     } catch (err) {
       console.error('Failed to fetch world section:', err);
@@ -179,6 +171,10 @@ export const WorldbuildingView = () => {
         setData(saved);
         setShowItemModal(false);
         if (activeSection === 'gallery') fetchLibrary();
+        const lastItem = Array.isArray(saved) && saved.length > 0 ? saved[saved.length - 1] : null;
+        if (lastItem?.name || lastItem?.term) {
+          trackRecentEdit(activeStory.id, { type: activeSection, id: lastItem.id, label: lastItem.name || lastItem.term, tab: 'world' });
+        }
       }
     } catch (err) {
       console.error('Failed to save world section:', err);
@@ -360,12 +356,28 @@ export const WorldbuildingView = () => {
   const handleSaveMechanics = (e) => {
     e.preventDefault();
     const rules = mechanicsForm.global_rules.split('\n').map((r) => r.trim()).filter(Boolean);
-    const updated = {
+    const newItem = {
+      id: mechanicsForm.id || (mechanicsForm.name || mechanicsForm.magic_system || 'mechanics').toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      name: mechanicsForm.name,
       magic_system: mechanicsForm.magic_system,
       technology_level: mechanicsForm.technology_level,
       global_rules: rules,
     };
+    const current = Array.isArray(data) ? data : [];
+    const updated = [...current.filter((item) => item.id !== newItem.id), newItem];
     saveSectionData(updated);
+  };
+
+  // Open the mechanics form pre-filled for editing
+  const handleEditMechanics = (mech) => {
+    setMechanicsForm({
+      id: mech.id || '',
+      name: mech.name || '',
+      magic_system: mech.magic_system || '',
+      technology_level: mech.technology_level || '',
+      global_rules: (mech.global_rules || []).join('\n'),
+    });
+    setShowItemModal(true);
   };
 
   if (!activeStory) {
@@ -394,8 +406,7 @@ export const WorldbuildingView = () => {
           </p>
         </div>
 
-        {activeSection !== 'mechanics' && (
-          <button
+        <button
             onClick={() => {
               if (activeSection === 'artifacts') {
                 setEditingArtifact(null);
@@ -406,6 +417,7 @@ export const WorldbuildingView = () => {
               setFactionForm({ id: '', name: '', description: '', leader: '', alignment: '' });
               setGlossaryForm({ id: '', term: '', definition: '', category: 'General' });
               setGalleryForm({ id: '', title: '', image_url: '', context: '', category: 'Concept Art', tags: '' });
+              setMechanicsForm({ id: '', name: '', magic_system: '', technology_level: '', global_rules: '' });
               setImageSourceMode('upload');
               setShowItemModal(true);
             }}
@@ -414,7 +426,6 @@ export const WorldbuildingView = () => {
             <Plus className="h-4 w-4" />
             <span>Add New Entry</span>
           </button>
-        )}
       </div>
 
       {/* Tabbed Navigation Bar */}
@@ -525,67 +536,93 @@ export const WorldbuildingView = () => {
 
         {/* 2. MAGIC & MECHANICS TAB */}
         {activeSection === 'mechanics' && (
-          <div className="literary-card rounded-2xl p-6 md:p-8 space-y-6 max-w-3xl">
-            <h3 className="font-prose text-xl font-bold text-[var(--text-main)] flex items-center gap-2">
-              <Zap className="h-5 w-5 text-[var(--accent)]" />
-              <span>World Mechanics & Universal Laws</span>
-            </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {Array.isArray(data) && data.length > 0 ? (
+              data.map((mech, idx) => (
+                <div key={mech.id || idx} className="literary-card rounded-2xl p-5 space-y-3 relative">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Zap className="h-4 w-4 text-[var(--accent)] shrink-0" />
+                      <h3 className="font-prose text-lg font-bold text-[var(--text-main)] truncate">
+                        {mech.name || mech.magic_system || 'World Mechanics'}
+                      </h3>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteItem(mech.id)}
+                      className="p-1.5 rounded-lg text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500 transition-colors shrink-0"
+                      title="Delete Mechanics"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
 
-            <form onSubmit={handleSaveMechanics} className="space-y-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
-                    Magic System / Energy Source
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={mechanicsForm.magic_system}
-                    onChange={(e) => setMechanicsForm({ ...mechanicsForm, magic_system: e.target.value })}
-                    placeholder="e.g. Elemental Runes & Aether Manipulation"
-                    className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
-                  />
+                  {mech.magic_system && (
+                    <div className="border-t border-[var(--border-subtle)] pt-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-dim)]">Magic System</span>
+                      <p className="text-xs text-[var(--text-main)] mt-0.5">{mech.magic_system}</p>
+                    </div>
+                  )}
+
+                  {mech.technology_level && (
+                    <div className="border-t border-[var(--border-subtle)] pt-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-dim)]">Technology Level</span>
+                      <p className="text-xs text-[var(--text-main)] mt-0.5">{mech.technology_level}</p>
+                    </div>
+                  )}
+
+                  {(mech.global_rules || []).length > 0 && (
+                    <div className="border-t border-[var(--border-subtle)] pt-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-dim)]">Global Rules & Limitations</span>
+                      <ul className="mt-1 space-y-1">
+                        {(mech.global_rules || []).map((rule, i) => (
+                          <li key={i} className="flex items-start gap-1.5 text-xs text-[var(--text-muted)]">
+                            <span className="text-[var(--accent)] mt-0.5">•</span>
+                            <span>{rule}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {characters.some((c) => (c.mechanic_ids || []).includes(mech.id)) && (
+                    <div className="border-t border-[var(--border-subtle)] pt-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-dim)]">Characters with this Power</span>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {characters
+                          .filter((c) => (c.mechanic_ids || []).includes(mech.id))
+                          .map((c) => (
+                            <span
+                              key={c.id}
+                              className="inline-flex items-center gap-1 rounded-md bg-[var(--accent-light)] px-2 py-0.5 text-[11px] font-semibold text-[var(--accent)] border border-[var(--border-subtle)]"
+                            >
+                              {c.image_url ? (
+                                <img src={c.image_url} alt={c.name} className="h-3.5 w-3.5 rounded-full object-cover" />
+                              ) : (
+                                <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[var(--accent)] text-[8px] font-bold text-white">
+                                  {(c.name || '?').charAt(0).toUpperCase()}
+                                </span>
+                              )}
+                              {c.name}
+                            </span>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => handleEditMechanics(mech)}
+                    className="mt-1 flex items-center gap-1.5 rounded-lg bg-[var(--accent-light)] px-3 py-1.5 text-[11px] font-semibold text-[var(--accent)] border border-[var(--border-subtle)] hover:bg-[var(--accent)] hover:text-white transition-all cursor-pointer"
+                  >
+                    <Edit3 className="h-3 w-3" />
+                    Edit
+                  </button>
                 </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
-                    Technology Level
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={mechanicsForm.technology_level}
-                    onChange={(e) => setMechanicsForm({ ...mechanicsForm, technology_level: e.target.value })}
-                    placeholder="e.g. Renaissance Clockwork"
-                    className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
-                  />
-                </div>
+              ))
+            ) : (
+              <div className="col-span-full p-12 literary-card rounded-2xl text-center text-xs text-[var(--text-muted)]">
+                No world mechanics defined yet. Click 'Add New Entry' to create a magic system, technology, or universal rules.
               </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
-                  Global Rules & Limitations (One rule per line)
-                </label>
-                <textarea
-                  rows={6}
-                  value={mechanicsForm.global_rules}
-                  onChange={(e) => setMechanicsForm({ ...mechanicsForm, global_rules: e.target.value })}
-                  placeholder="Rule 1: Magic requires physical stamina...&#10;Rule 2: Iron negates all spellcasting..."
-                  className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-base)] p-3 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden font-mono"
-                />
-              </div>
-
-              <div className="flex justify-end pt-2">
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="flex items-center gap-2 rounded-xl bg-[var(--accent)] px-5 py-2.5 text-xs font-semibold text-white shadow-md hover:bg-[var(--accent-hover)] transition-all cursor-pointer"
-                >
-                  <Save className="h-4 w-4" />
-                  <span>{saving ? 'Saving...' : 'Save World Rules'}</span>
-                </button>
-              </div>
-            </form>
+            )}
           </div>
         )}
 
@@ -926,6 +963,8 @@ export const WorldbuildingView = () => {
             <h3 className="font-prose text-xl font-bold text-[var(--text-main)]">
               {activeSection === 'cities'
                 ? cityForm.id ? 'Edit City/Location' : 'Add City/Location'
+                : activeSection === 'mechanics'
+                ? mechanicsForm.id ? 'Edit World Mechanics' : 'Add World Mechanics'
                 : activeSection === 'gallery'
                 ? 'Add Gallery Artwork'
                 : 'Add ' + activeSection.substring(0, 1).toUpperCase() + activeSection.substring(1) + ' Entry'}
@@ -1377,6 +1416,75 @@ export const WorldbuildingView = () => {
                     className="rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white hover:bg-[var(--accent-hover)]"
                   >
                     Save Artwork
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Mechanics Form */}
+            {activeSection === 'mechanics' && (
+              <form onSubmit={handleSaveMechanics} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                    Name (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={mechanicsForm.name}
+                    onChange={(e) => setMechanicsForm({ ...mechanicsForm, name: e.target.value })}
+                    placeholder="e.g. Elemental Runes & Aether Manipulation"
+                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                    Magic System / Energy Source
+                  </label>
+                  <input
+                    type="text"
+                    value={mechanicsForm.magic_system}
+                    onChange={(e) => setMechanicsForm({ ...mechanicsForm, magic_system: e.target.value })}
+                    placeholder="e.g. Elemental Runes & Aether Manipulation"
+                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                    Technology Level
+                  </label>
+                  <input
+                    type="text"
+                    value={mechanicsForm.technology_level}
+                    onChange={(e) => setMechanicsForm({ ...mechanicsForm, technology_level: e.target.value })}
+                    placeholder="e.g. Renaissance Clockwork"
+                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                    Global Rules & Limitations (One rule per line)
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={mechanicsForm.global_rules}
+                    onChange={(e) => setMechanicsForm({ ...mechanicsForm, global_rules: e.target.value })}
+                    placeholder="Rule 1: Magic requires physical stamina...&#10;Rule 2: Iron negates all spellcasting..."
+                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden font-mono"
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowItemModal(false)}
+                    className="rounded-lg px-4 py-2 text-xs font-semibold text-[var(--text-muted)] hover:bg-[var(--bg-hover)]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white hover:bg-[var(--accent-hover)]"
+                  >
+                    Save Mechanics
                   </button>
                 </div>
               </form>

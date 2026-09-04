@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from app.schemas import (
     Story, Character, CharacterAppearances, CharacterMap, WorldMechanics, City, Faction, Artifact,
     GlossaryTerm, Quote, Book, Chapter, Plot, CharacterArc, StoryImageItem, EntityRefItem,
-    WritingStats, GoogleAuthStatus
+    WritingStats, GoogleAuthStatus, StoryInsights,
 )
 from app.file_manager import FileManager
 from app.google_auth import GoogleAuthService
@@ -244,6 +244,11 @@ def get_writing_stats(story_id: str):
     return file_manager.get_writing_stats(story_id)
 
 
+@app.get("/api/stories/{story_id}/insights", response_model=StoryInsights)
+def get_story_insights(story_id: str):
+    return file_manager.get_story_insights(story_id)
+
+
 # --- 4. Book & Chapter Endpoints ---
 
 @app.get("/api/stories/{story_id}/books", response_model=List[Book])
@@ -304,8 +309,9 @@ def update_character_arcs(story_id: str, book_id: str, arcs: List[CharacterArc])
 # --- 5. Chapter CRUD & Prose Content Routes ---
 
 @app.get("/api/stories/{story_id}/books/{book_id}/chapters", response_model=List[Chapter])
-def list_chapters(story_id: str, book_id: str):
-    return file_manager.list_chapters(story_id, book_id)
+def list_chapters(story_id: str, book_id: str, sort: str = "asc"):
+    reverse = sort.lower() == "desc"
+    return file_manager.list_chapters(story_id, book_id, reverse=reverse)
 
 
 @app.post("/api/stories/{story_id}/books/{book_id}/chapters", response_model=Chapter)
@@ -357,6 +363,19 @@ def reorder_chapters(story_id: str, book_id: str, payload: ReorderPayload):
     return reordered
 
 
+class RenameChapterPayload(BaseModel):
+    old_id: str
+    new_id: str
+
+
+@app.post("/api/stories/{story_id}/books/{book_id}/chapters/rename")
+def rename_chapter(story_id: str, book_id: str, payload: RenameChapterPayload):
+    renamed, swapped = file_manager.rename_chapter(story_id, book_id, payload.old_id, payload.new_id)
+    if not renamed:
+        raise HTTPException(status_code=400, detail="Rename failed: source chapter not found.")
+    return {"chapter": renamed.model_dump(), "swapped": swapped.model_dump() if swapped else None}
+
+
 @app.get("/api/stories/{story_id}/books/{book_id}/chapters/{ch_id}/content")
 @app.get("/api/stories/{story_id}/books/{book_id}/chapters/{ch_id}/prose")
 def read_chapter_content(story_id: str, book_id: str, ch_id: str):
@@ -370,6 +389,55 @@ def read_chapter_content(story_id: str, book_id: str, ch_id: str):
 def save_chapter_content(story_id: str, book_id: str, ch_id: str, payload: ProsePayload):
     word_count = file_manager.save_chapter_prose(story_id, book_id, ch_id, payload.content)
     return {"message": "Chapter content saved successfully", "word_count": word_count}
+
+
+class FindReplacePayload(BaseModel):
+    find: str
+    replace: str = ""
+    case_sensitive: bool = False
+    whole_word: bool = False
+    dry_run: bool = True
+
+
+@app.post("/api/stories/{story_id}/find-replace")
+def find_replace_across_chapters(story_id: str, payload: FindReplacePayload):
+    return file_manager.find_replace_across_chapters(
+        story_id,
+        find_text=payload.find,
+        replace_text=payload.replace,
+        case_sensitive=payload.case_sensitive,
+        whole_word=payload.whole_word,
+        dry_run=payload.dry_run,
+    )
+
+
+class SaveAIDraftPayload(BaseModel):
+    title: str = ""
+    content: str
+    scene_breakdown: str = ""
+    pov_character_id: Optional[str] = None
+
+
+@app.post("/api/stories/{story_id}/books/{book_id}/chapters/from-ai", response_model=Chapter)
+def save_ai_draft_as_chapter(story_id: str, book_id: str, payload: SaveAIDraftPayload):
+    import re as _re
+    import uuid as _uuid
+
+    if not (payload.content or "").strip():
+        raise HTTPException(status_code=400, detail="Draft content is empty.")
+
+    title = (payload.title or "").strip() or "Untitled Draft"
+    ch_id = "ch-" + _uuid.uuid4().hex[:8]
+
+    chapter = Chapter(
+        id=ch_id,
+        title=title,
+        scene_breakdown=payload.scene_breakdown or "",
+        pov_character_id=payload.pov_character_id,
+    )
+    saved = file_manager.save_chapter(story_id, book_id, chapter)
+    file_manager.save_chapter_prose(story_id, book_id, ch_id, payload.content)
+    return saved
 
 
 # --- 6. Google Drive OAuth2 & Backup Engine ---
@@ -611,6 +679,41 @@ async def run_ai_pipeline(req: RunRequest):
         )
     job = await job_manager.enqueue(req.story_id, req.skill, req.input or RunInput())
     return job
+
+
+@app.get("/api/stories/{story_id}/books/{book_id}/chapters/{chapter_id}/art-suggestions")
+async def chapter_art_suggestions(story_id: str, book_id: str, chapter_id: str):
+    """Auto-detect the reference images for the chapter-art skill: the POV character's
+    portrait (or first gallery image) and the scene location's city image. Powers the
+    one-click "Generate Cover Art" button on the chapter card / editor."""
+    images: List[str] = []
+    chapter = file_manager.get_chapter(story_id, book_id, chapter_id)
+    character_id = None
+    location_name = None
+
+    if chapter and chapter.pov_character_id:
+        character_id = chapter.pov_character_id
+        char = file_manager.get_character(story_id, chapter.pov_character_id)
+        if char:
+            location_name = char.location or None
+            img = char.image_url or ""
+            if not img and (char.gallery or []):
+                img = char.gallery[0]
+            if img:
+                images.append(img)
+
+    if location_name:
+        city = next((c for c in file_manager.get_cities(story_id) if c.name == location_name), None)
+        if city and city.image_url:
+            images.append(city.image_url)
+
+    return {
+        "chapter_id": chapter_id,
+        "character_id": character_id,
+        "location": location_name,
+        "images": images[:2],
+    }
+
 
 
 @app.get("/api/ai/jobs/{story_id}", response_model=List[AIJob])

@@ -1,7 +1,157 @@
+- **2026-09-03 — New AI skill: Chapter Art (local diffusion illustration).**
+  - New built-in multi-step pipeline `chapter_art` (`pipelines.py`): the vision LLM writes a
+    detailed image prompt grounded in the chapter outline + POV character + location + prose
+    (context builder `_chapter_art_context`), then a local Juggernaut XL script renders the
+    illustration, which is saved to the story's assets and attached to the chapter.
+  - `Chapter` schema gains `image_url` (persisted via `model_dump` on save).
+  - New `backend/app/ai/generator.py`: async wrapper that shells out to
+    `juggernaut_xl_generate.py` via `GENERATE_SCRIPT`; `generate_image()` returns the PNG path,
+    `is_generation_enabled()`. Config knobs: `GENERATE_SCRIPT`, `GENERATE_PYTHON`,
+    `GENERATE_STEPS`, `GENERATE_SEED`, `GENERATE_GUIDANCE`, `GENERATE_WIDTH`,
+    `GENERATE_HEIGHT`.
+  - `StepSpec` gains `kind` (`"llm"` default | `"generate"`). `jobs.py` runs `kind="generate"`
+    steps through `generator.generate_image`, saves the asset via `FileManager.save_asset`, and
+    attaches it via new `FileManager.set_chapter_image_url` (pipeline `chapter_art` only).
+    LLM steps now attach staged images to a vision/ocr step's last message. Stage labels
+    `chapter_art_prompt` / `chapter_art_generate` show in the Job section.
+  - Frontend: `BookOutlinerView` chapter cards and `DraftEditorView` render `chapter.image_url`.
+  - One-click inline "Generate Cover Art": `BookOutlinerView` chapter cards (Sparkles button)
+    and `DraftEditorView`'s editor header (Cover Art button) run the skill via
+    `frontend/src/utils/chapterArt.js::runChapterArt`, which auto-detects the POV character +
+    region city reference images from the new `GET .../chapters/{id}/art-suggestions` endpoint
+    (image picker stays only in the AI Panel). Both poll the job and refresh chapter metadata so
+    the generated `image_url` thumbnail appears in place.
+  - The `_chapter_art_context` builder also includes the book's plot outline for the target
+    chapter (`_chapter_plot_context`): the beats whose `chapter_id` falls on the chapter plus
+    the plot `theme`, so the illustration is grounded in the scene's beat/dramatic intent.
+  - Generator script is **vendored** into the repo at
+    `backend/scripts/juggernaut_xl_generate.py`; `get_generate_script()` defaults to it (so
+    generation is enabled out of the box when torch+diffusers exist), and
+    `get_generate_python()` auto-resolves to a PATH `python3` that imports torch+diffusers
+    (else the Apple-Silicon framework python, else `python3`).
+  - Each AI Panel skill card now shows its `required_models` chips (from
+    `PipelineSummary.required_models`, computed per step by `_required_models`: explicit
+    `model_preferred`, else `Text/Vision/OCR LLM`, else "Local diffusion (Juggernaut XL)" for
+    `kind=="generate"`).
+
+- **2026-09-04 — Implemented feature ideas 10–13 (find & replace, recently edited, chapter targets, character relationships).**
+  - **Cross-Chapter Find & Replace (#10):** new `POST /api/stories/{id}/find-replace`
+    (`FileManager.find_replace_across_chapters`) searches/replaces text across every chapter's
+    `.md` in all books, with case-sensitivity + whole-word options and a `dry_run` that previews
+    matches (with context snippets) before applying. UI: "Find & Replace" button on the Book
+    Outliner tree toolbar opens a modal (Preview → Replace All).
+  - **Sidebar "Recently Edited" (#11):** new `frontend/src/utils/recentlyEdited.js`
+    (`trackRecentEdit`/`getRecentEdits`, per-story, persisted in localStorage, max 10). Wired
+    into the Sidebar as a "Recently Edited" section (last 5) that jumps to the right tab, and
+    into saves from the Character Roster, Draft Editor, Book Outliner, and Worldbuilding views.
+  - **Chapter Word Count Targets + Progress Bars (#12):** `Chapter` schema gains
+    `target_word_count`. Book Outliner chapter modal lets you set a per-chapter target, and each
+    chapter card now shows a word-count progress bar (green when at/over target). The existing
+    per-book progress bar already showed total vs. `target_word_count`.
+  - **Character Relationship Editor (#13):** `Character` schema gains
+    `relationships: List[CharacterRelationship]` (`character_id` + free-text `label` like
+    sibling/rival/mentor). New inline "Relationships" detail tab on the Character Roster to
+    add/edit/remove declared relationships. `get_character_map` now merges declared
+    relationships into the map (adds a declared-only edge when the pair never co-occurs in a
+    beat, and carries the label); `CharacterMapEdge` gains `relationship_label` shown in the
+    link tooltip + bond panel.
+
 # CHANGELOG — codebase knowledge updates
 
 Every time you change functionality, add a dated entry here summarizing what changed and
 update the relevant section(s) in AGENTS.md.
+
+- **2026-09-03 — Characters can link to multiple world mechanics (powers).**
+  - `Character` schema gains `mechanic_ids[]` (default `[]`) — a character can be linked to
+    multiple `WorldMechanics` entries (magic systems / powers / tech).
+  - `CharacterRosterView` adds a "Mechanics" detail tab (Zap icon): attach existing story
+    mechanics via a dropdown and detach them, preserving `mechanic_ids` in the character save
+    payload.
+  - `WorldbuildingView` mechanics cards now list "Characters with this Power" (resolved from
+    each character's `mechanic_ids`).
+
+- **2026-09-02 — Multiple world mechanics (mechanics.json is now an array).**
+  - `WorldMechanics` schema gains `id` and `name` fields (both default `""`).
+  - `mechanics.json` is now a **list** of `WorldMechanics`; a world can define several
+    magic/tech systems (mirrors the other world sections). `FileManager.ensure_story_structure`
+    defaults it to one "Core Universal Laws" entry; `get_world_mechanics` returns a
+    `List[WorldMechanics]` and auto-migrates a legacy single-object file into a 1-element
+    list (backfilling `id`/`name` from `magic_system` when missing via a new `_slugify`
+    helper). `save_world_mechanics` now takes/saves a list. `get_world_section` always
+    defaults to `[]` (removed the mechanics object special-case).
+  - `ai/context.py build_mechanics` emits a list of mechanics dicts.
+  - Creator `EntityMerger.merge_world` now appends an extracted mechanics entry instead of
+    mutating a singleton.
+  - `WorldbuildingView.jsx` mechanics tab is now a lists of cards (like factions/glossary)
+    with add/edit/delete via the shared item modal; "Add New Entry" now works for mechanics.
+
+- **2026-09-02 — Reusable CharacterPicker (search + images + scrollable).**
+  - New shared component `frontend/src/components/CharacterPicker.jsx`: a dropdown
+    character selector with a built-in search box, character image thumbnails (with
+    letter-avatar fallback), scrollable list (custom `maxVisible`), single-select and
+    multi-select (with removable chips + "N selected" footer) modes, and outside-click
+    dismissal.
+  - Replaced native `<select>`/checkbox lists with `CharacterPicker` in:
+    `BookOutlinerView.jsx` (chapter POV character, plot-beat characters multi-select,
+    character-arc character), `DraftEditorView.jsx` (Perspective Rewrite persona),
+    `AIPanel.jsx` (AI skill "Focus on" character scope, kept `min-w-[140px]`).
+  - Added character image thumbnails to the character quick-add buttons in
+    `QuotesView.jsx` and the character results in `QuickSearchModal.jsx`.
+
+- **2026-09-01 — New AI skill: Draft Chapter from Breakdown + save result as chapter.**
+  - New built-in pipeline `chapter_draft` — drafts a full chapter from a chapter's scene
+    breakdown, the POV character's persona, the personas/notes of every character mentioned
+    via `[[...]]` tokens in the breakdown, and the relevant world context (mechanics,
+    cities, factions, artifacts, glossary) plus the book's plot beats. Tabs: `editor`,
+    `outliner`; `input_kind=selection` (`chapter_id`); `system_prompt_key=creative`;
+    `model_preferred=qwen2.5:7b`; `save_targets=["prose.insert","chapter.notes"]`.
+  - Backend: `context.py` adds `_chapter_draft_context` (and builder registration);
+    `prompts.py` adds `chapter_draft` task + a `step_messages` branch using the creative
+    system prefix. New route `POST /api/stories/{id}/books/{book_id}/chapters/from-ai`
+    (`SaveAIDraftPayload { title, content, scene_breakdown, pov_character_id }`) creates a
+    new chapter (uuid `ch-<hex>`) and writes the prose via `FileManager`.
+  - Frontend: new shared `components/SaveAsChapter.jsx` widget (book picker + title +
+    create) rendered under AI results in `AIPanel.jsx` and `SkillStudioView.jsx`
+    (`TestOutput`); `chapter_draft` emoji added to both skill maps.
+
+
+- **2026-09-01 — Book Outliner: `@` entity references.**
+  - `BookOutlinerView.jsx` now supports the shared `@` entity-reference system in the
+    outliner: scene breakdown (inline editing + preview), plot-beat descriptions (modal),
+    character-arc summary/starting-state/ending-state/key-milestones (modal), and the
+    Chapter Judge prompt textarea all bind `useEntityMention` (`onInput`/`onKeyDown`).
+    The `@` dropdown is mounted once in the view; `/references` is fetched on story load
+    (same pattern as DraftEditorView/WorldbuildingView/CharacterRosterView).
+  - Read-only renders now resolve `[[type:id|label]]` tokens: beat descriptions and arc
+    summary/starting/ending states use `EntityReferenceText`; scene breakdown preview +
+    display and the judge result render through `renderMarkdown`, which wraps
+    `markdownComponents` with `withEntityReferences`. No backend changes needed — plot
+    beats/arcs/scene-breakdowns already persist these tokens as plain text.
+
+- **2026-09-01 — Chapter sort toggle (ascending / descending).**
+  - Backend: `FileManager.list_chapters` gains `reverse: bool = False` (reverses the
+    `(order, numeric-id)` sort). `GET /api/stories/{id}/books/{book_id}/chapters` accepts an
+    optional `?sort=asc|desc` query param (default `asc`).
+  - Frontend: `BookOutlinerView.jsx` and `DraftEditorView.jsx` each gain an ↑A–Z / ↓Z–A
+    sort toggle (segmented button group, active = accent bg) next to the chapter list /
+    selector. Sort direction is persisted per story in `localStorage`
+    (`loresmith_chapter_sort_{storyId}`) and passed to the chapter fetch. BookOutliner now
+    sorts its tree by the `order` field (was numeric `id`), matching the backend + Judge
+    defaults.
+
+- **2026-09-01 — Book Outliner: drag-and-drop chapter reordering + pagination.**
+  - Backend: `Chapter` schema gains `order: Optional[int] = 0`. `FileManager.save_chapter`
+    assigns `order = max(existing order) + 1` when the payload omits it; `list_chapters`
+    now returns chapters sorted by `order` (numeric-id tiebreak), so the tree view and AI
+    judges receive chapters in the same, user-chosen sequence.
+  - New route `POST /api/stories/{id}/books/{book_id}/chapters/reorder`
+    (`ReorderPayload { chapter_ids: List[str] }`) — writes 1-based `order` back to each
+    chapter and returns the reordered list.
+  - Frontend: `BookOutlinerView.jsx` tree view now renders chapters with `@dnd-kit`
+    (`@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities` — new deps): a grip
+    handle on each chapter card, `onDragEnd` reorders state + POSTs the new id order to
+    `/chapters/reorder`. Tree view is paginated (`CHAPTERS_PER_PAGE = 10`) with ◀ / ▶
+    pagination controls styled like the Skill Studio job tracker.
 
 - **2026-09-01 — Skill Studio UX polish (icons + job tracker).**
   - `SkillStudioView.jsx`: custom-skill catalog cards condensed to compact emoji+name tiles

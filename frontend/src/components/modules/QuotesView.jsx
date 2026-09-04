@@ -331,7 +331,16 @@ export const QuotesView = () => {
                         onClick={() => addTagToForm(c.name)}
                         className="inline-flex items-center gap-1 rounded-md bg-[var(--bg-hover)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-muted)] hover:bg-[var(--accent-light)] hover:text-[var(--accent)]"
                       >
-                        <Users className="h-3 w-3" />
+                        {c.image_url ? (
+                          <img
+                            src={c.image_url}
+                            alt=""
+                            className="h-3.5 w-3.5 rounded-full object-cover"
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          />
+                        ) : (
+                          <Users className="h-3 w-3" />
+                        )}
                         {c.name}
                       </button>
                     ))}

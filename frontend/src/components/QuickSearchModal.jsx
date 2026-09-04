@@ -55,6 +55,7 @@ export const QuickSearchModal = () => {
                 title: c.name,
                 sub: `Character • ${c.role || 'Main Roster'}`,
                 icon: Users,
+                image_url: c.image_url,
                 action: () => setActiveTab('characters'),
               });
             }
@@ -175,9 +176,18 @@ export const QuickSearchModal = () => {
                   }}
                   className="w-full flex items-center gap-3 rounded-xl p-2.5 text-left transition-colors hover:bg-[var(--bg-hover)]"
                 >
-                  <div className="rounded-lg bg-[var(--accent-light)] p-2 text-[var(--accent)]">
-                    <Icon className="h-4 w-4" />
-                  </div>
+                  {item.image_url ? (
+                    <img
+                      src={item.image_url}
+                      alt=""
+                      className="h-8 w-8 rounded-lg object-cover border border-[var(--border-subtle)] shrink-0"
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                    />
+                  ) : (
+                    <div className="rounded-lg bg-[var(--accent-light)] p-2 text-[var(--accent)]">
+                      <Icon className="h-4 w-4" />
+                    </div>
+                  )}
                   <div className="flex-1 truncate">
                     <div className="text-sm font-semibold text-[var(--text-main)]">{item.title}</div>
                     <div className="text-xs text-[var(--text-muted)]">{item.sub}</div>

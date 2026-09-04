@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 from app.schemas import (
-    Story, Character, WorldMechanics, City, Faction, Artifact, GlossaryTerm, Quote,
+    Story, Character, CharacterRelationship, WorldMechanics, City, Faction, Artifact, GlossaryTerm, Quote,
     Book, Chapter, Plot, CharacterArc, WritingStats, WritingStatsDay,
     StoryInsights, ProductivityInsights, BookProgress, ComprehensionInsights,
     OrphanedCharacter, PovEntry, FactionCoverage, ArtifactOwnership,
@@ -63,11 +63,13 @@ class FileManager:
         # Initialize default files if missing
         world_files_defaults = {
             "cities.json": [],
-            "mechanics.json": {
+            "mechanics.json": [{
+                "id": "core-universal-laws",
+                "name": "Core Universal Laws",
                 "magic_system": "Standard / Soft Magic",
                 "technology_level": "Medieval / Renaissance",
                 "global_rules": ["Energy cannot be created from nothing."]
-            },
+            }],
             "factions.json": [],
             "artifacts.json": [],
             "glossary.json": [],
@@ -193,13 +195,14 @@ class FileManager:
         facts.append(f"{chapter_total} chapter{'s' if chapter_total != 1 else ''} have been drafted so far.")
         facts.append(f"Roughly {word_total:,} words of prose have been written.")
 
-        mech = self.get_world_mechanics(story_slug)
-        if mech.magic_system and mech.magic_system.strip():
-            facts.append(f"The magic system runs on '{mech.magic_system.strip()}'.")
-        if mech.technology_level and mech.technology_level.strip():
-            facts.append(f"Technology level: '{mech.technology_level.strip()}'.")
-        if mech.global_rules:
-            facts.append(f"A key world rule: '{mech.global_rules[0]}'.")
+        mech_list = self.get_world_mechanics(story_slug)
+        for mech in mech_list:
+            if mech.magic_system and mech.magic_system.strip():
+                facts.append(f"The magic system runs on '{mech.magic_system.strip()}'.")
+            if mech.technology_level and mech.technology_level.strip():
+                facts.append(f"Technology level: '{mech.technology_level.strip()}'.")
+            if mech.global_rules:
+                facts.append(f"A key world rule: '{mech.global_rules[0]}'.")
 
         if characters:
             pick = characters[0]
@@ -441,9 +444,13 @@ class FileManager:
             faction_coverage=faction_cov,
             artifact_ownership=artifact_own,
             glossary_spread=gloss_spread,
-            world_rules_count=len(mech.global_rules),
-            has_magic_system=bool(mech.magic_system and mech.magic_system.strip()),
-            has_tech_level=bool(mech.technology_level and mech.technology_level.strip()),
+            world_rules_count=sum(len(m.global_rules) for m in mech),
+            has_magic_system=any(
+                m.magic_system and m.magic_system.strip() for m in mech
+            ),
+            has_tech_level=any(
+                m.technology_level and m.technology_level.strip() for m in mech
+            ),
             characters_with_timeline=chars_with_tl,
             characters_without_timeline=chars_without_tl,
             avg_key_locations_per_city=avg_kl,
@@ -526,9 +533,9 @@ class FileManager:
             if best.quotes:
                 most_quoted = MostQuotedCharacter(id=best.id, name=best.name, count=len(best.quotes))
 
+        gallery_total = len(self.get_image_library(story_slug))
         gallery = self.get_world_section(story_slug, "gallery")
         gallery_items = gallery if isinstance(gallery, list) else []
-        gallery_total = len(gallery_items)
         cat_counter2: Counter = Counter()
         for item in gallery_items:
             cat = item.get("category") if isinstance(item, dict) else "Concept Art"
@@ -718,11 +725,11 @@ class FileManager:
 
     def get_character_map(self, story_slug: str):
         """
-        Derives a character-relationship graph from plot beat co-occurrence:
-        every plot beat listing 2+ characters contributes one interaction edge
-        between each pair. Each edge carries its interactions (grouped by the
-        book/chapter the shared beat belongs to) so the frontend can drill into
-        "where" two characters interact.
+        Derives a character-relationship graph from plot beat co-occurrence AND
+        declared relationships[] on each character. Every plot beat listing 2+
+        characters contributes one interaction edge between each pair. Declared
+        relationships add edges with weight=0 (declaration-only, no beat) or
+        augment existing edges with their label.
         """
         from app.schemas import (
             CharacterMap, CharacterMapNode, CharacterMapEdge,
@@ -756,7 +763,7 @@ class FileManager:
                     for j in range(i + 1, len(char_ids)):
                         key = tuple(sorted((char_ids[i], char_ids[j])))
                         record = edges_by_pair.setdefault(
-                            key, {"source": key[0], "target": key[1], "interactions": []}
+                            key, {"source": key[0], "target": key[1], "interactions": [], "relationship_label": ""}
                         )
                         record["interactions"].append(CharacterMapInteraction(
                             book_id=book.id,
@@ -767,13 +774,31 @@ class FileManager:
                             chapter=chapter_ref,
                         ))
 
+        # Merge declared relationships into edges
+        for char in characters:
+            for rel in (char.relationships or []):
+                if rel.character_id not in node_map:
+                    continue
+                key = tuple(sorted((char.id, rel.character_id)))
+                if key in edges_by_pair:
+                    if rel.label and not edges_by_pair[key]["relationship_label"]:
+                        edges_by_pair[key]["relationship_label"] = rel.label
+                else:
+                    edges_by_pair[key] = {
+                        "source": key[0],
+                        "target": key[1],
+                        "interactions": [],
+                        "relationship_label": rel.label or "",
+                    }
+
         edges = [
             CharacterMapEdge(
                 id=f"{rec['source']}--{rec['target']}",
                 source=rec["source"],
                 target=rec["target"],
-                weight=len(rec["interactions"]),
+                weight=max(len(rec["interactions"]), 1 if rec.get("relationship_label") else 0),
                 interactions=rec["interactions"],
+                relationship_label=rec.get("relationship_label", ""),
             )
             for rec in edges_by_pair.values()
         ]
@@ -999,8 +1024,7 @@ class FileManager:
 
     def get_world_section(self, story_slug: str, section: str) -> Any:
         path = self.get_world_file_path(story_slug, section)
-        default_val = {} if section == "mechanics" else []
-        return read_json_safe(path, default=default_val)
+        return read_json_safe(path, default=[])
 
     def save_world_section(self, story_slug: str, section: str, data: Any) -> Any:
         self.ensure_story_structure(story_slug)
@@ -1008,18 +1032,31 @@ class FileManager:
         write_json_safe(path, data)
         return data
 
-    def get_world_mechanics(self, story_slug: str) -> WorldMechanics:
-        path = self.get_world_file_path(story_slug, "mechanics")
-        data = read_json_safe(path)
-        if not data:
-            return WorldMechanics(magic_system="Soft Magic", technology_level="Medieval", global_rules=[])
-        return WorldMechanics(**data)
+    def _slugify(self, name: str) -> str:
+        slug = name.lower()
+        slug = re.sub(r"[^a-z0-9]+", "-", slug).strip("-")
+        return slug or "mechanics"
 
-    def save_world_mechanics(self, story_slug: str, mechanics: WorldMechanics) -> WorldMechanics:
+    def get_world_mechanics(self, story_slug: str) -> List[WorldMechanics]:
+        path = self.get_world_file_path(story_slug, "mechanics")
+        data = read_json_safe(path, default=[])
+        if not isinstance(data, list):
+            data = [data]
+        mechanics = []
+        for item in data:
+            if not item:
+                continue
+            mech = WorldMechanics(**item)
+            if not mech.id:
+                mech.id = self._slugify(mech.name or mech.magic_system or "mechanics")
+            mechanics.append(mech)
+        return mechanics
+
+    def save_world_mechanics(self, story_slug: str, mechanics_list: List[WorldMechanics]) -> List[WorldMechanics]:
         self.ensure_story_structure(story_slug)
         path = self.get_world_file_path(story_slug, "mechanics")
-        write_json_safe(path, mechanics.model_dump())
-        return mechanics
+        write_json_safe(path, [m.model_dump() for m in mechanics_list])
+        return mechanics_list
 
     def get_cities(self, story_slug: str) -> List[City]:
         path = self.get_world_file_path(story_slug, "cities")
@@ -1183,6 +1220,18 @@ class FileManager:
         write_json_safe(ch_json_path, chapter.model_dump())
         return chapter
 
+    def set_chapter_image_url(self, story_slug: str, book_id: str, chapter_id: str, image_url: str) -> Optional[Chapter]:
+        """Persist a generated illustration url on an existing chapter (in-place)."""
+        ch = self.get_chapter(story_slug, book_id, chapter_id)
+        if not ch:
+            return None
+        ch.image_url = image_url
+        write_json_safe(
+            self.get_chapter_json_path(story_slug, book_id, chapter_id),
+            ch.model_dump(),
+        )
+        return ch
+
     def get_chapter(self, story_slug: str, book_id: str, chapter_id: str) -> Optional[Chapter]:
         ch_json_path = self.get_chapter_json_path(story_slug, book_id, chapter_id)
         data = read_json_safe(ch_json_path)
@@ -1190,11 +1239,15 @@ class FileManager:
             return None
         return Chapter(**data)
 
-    def list_chapters(self, story_slug: str, book_id: str) -> List[Chapter]:
+    def list_chapters(self, story_slug: str, book_id: str, reverse: bool = False) -> List[Chapter]:
         chapters_dir = self.get_book_dir(story_slug, book_id) / "chapters"
         chapters: List[Chapter] = []
         if not chapters_dir.exists():
             return chapters
+
+        def _id_num(cid: str) -> int:
+            m = re.search(r'\d+', cid or '')
+            return int(m.group()) if m else 0
 
         for file_path in chapters_dir.glob("ch-*.json"):
             data = read_json_safe(file_path)
@@ -1203,9 +1256,83 @@ class FileManager:
                     chapters.append(Chapter(**data))
                 except Exception as e:
                     print(f"Error parsing chapter {file_path}: {e}")
-        
-        chapters.sort(key=lambda c: (c.order or 0, int((c.id or '0').replace('ch-', '') or '0')))
+
+        chapters.sort(key=lambda c: (c.order or 0, _id_num(c.id)), reverse=reverse)
         return chapters
+
+    def rename_chapter(self, story_slug: str, book_id: str, old_id: str, new_id: str):
+        """Rename or swap chapter ids. Returns (renamed_chapter, swapped_chapter_or_None)."""
+        if old_id == new_id:
+            return self.get_chapter(story_slug, book_id, old_id), None
+
+        target = self.get_chapter(story_slug, book_id, new_id)
+        source = self.get_chapter(story_slug, book_id, old_id)
+        if not source:
+            return None, None
+
+        swap_ch = None
+        if target:
+            tmp_id = f"_swap_{old_id}_{new_id}"
+            target.id = tmp_id
+            target.markdown_file_path = f"books/book-{book_id}/chapters/ch-{tmp_id}.md"
+            write_json_safe(self.get_chapter_json_path(story_slug, book_id, tmp_id), target.model_dump())
+            old_target_json = self.get_chapter_json_path(story_slug, book_id, new_id)
+            new_target_json = self.get_chapter_json_path(story_slug, book_id, tmp_id)
+            if old_target_json.exists():
+                os.rename(old_target_json, new_target_json)
+            old_target_md = self.get_chapter_md_path(story_slug, book_id, new_id)
+            new_target_md = self.get_chapter_md_path(story_slug, book_id, tmp_id)
+            if old_target_md.exists():
+                os.rename(old_target_md, new_target_md)
+
+        old_json = self.get_chapter_json_path(story_slug, book_id, old_id)
+        new_json = self.get_chapter_json_path(story_slug, book_id, new_id)
+        old_md = self.get_chapter_md_path(story_slug, book_id, old_id)
+        new_md = self.get_chapter_md_path(story_slug, book_id, new_id)
+
+        if old_json.exists():
+            os.rename(old_json, new_json)
+        if old_md.exists():
+            os.rename(old_md, new_md)
+
+        source.id = new_id
+        source.markdown_file_path = f"books/book-{book_id}/chapters/ch-{new_id}.md"
+        new_id_num = re.search(r'\d+', new_id or '')
+        if new_id_num:
+            source.order = int(new_id_num.group())
+        write_json_safe(new_json, source.model_dump())
+
+        if target:
+            swap_ch = self.get_chapter(story_slug, book_id, f"_swap_{old_id}_{new_id}")
+            if swap_ch:
+                swap_ch.id = old_id
+                swap_ch.markdown_file_path = f"books/book-{book_id}/chapters/ch-{old_id}.md"
+                old_id_num = re.search(r'\d+', old_id or '')
+                if old_id_num:
+                    swap_ch.order = int(old_id_num.group())
+                swap_tmp_json = self.get_chapter_json_path(story_slug, book_id, f"_swap_{old_id}_{new_id}")
+                swap_final_json = self.get_chapter_json_path(story_slug, book_id, old_id)
+                if swap_tmp_json.exists():
+                    os.rename(swap_tmp_json, swap_final_json)
+                swap_tmp_md = self.get_chapter_md_path(story_slug, book_id, f"_swap_{old_id}_{new_id}")
+                swap_final_md = self.get_chapter_md_path(story_slug, book_id, old_id)
+                if swap_tmp_md.exists():
+                    os.rename(swap_tmp_md, swap_final_md)
+                write_json_safe(swap_final_json, swap_ch.model_dump())
+
+        plot = self.get_plot(story_slug, book_id)
+        changed = False
+        for beat in plot.beats:
+            if beat.chapter_id == old_id:
+                beat.chapter_id = new_id
+                changed = True
+            elif target and beat.chapter_id == new_id:
+                beat.chapter_id = old_id
+                changed = True
+        if changed:
+            self.save_plot(story_slug, book_id, plot)
+
+        return source, swap_ch
 
     def delete_chapter(self, story_slug: str, book_id: str, chapter_id: str) -> bool:
         ch_json_path = self.get_chapter_json_path(story_slug, book_id, chapter_id)
@@ -1231,3 +1358,70 @@ class FileManager:
             write_json_safe(ch_json_path, chapter.model_dump())
 
         return word_count
+
+    def find_replace_across_chapters(self, story_slug: str, find_text: str, replace_text: str = "", case_sensitive: bool = False, whole_word: bool = False, dry_run: bool = True):
+        """
+        Search (and optionally replace) text across all chapters in all books.
+        Returns list of matches per chapter.
+        """
+        import re as _re
+
+        if not find_text:
+            return {"total_matches": 0, "chapters": [], "total_replaced": 0}
+
+        flags = 0 if case_sensitive else _re.IGNORECASE
+        if whole_word:
+            pattern = _re.compile(r'\b' + _re.escape(find_text) + r'\b', flags)
+        else:
+            pattern = _re.compile(_re.escape(find_text), flags)
+
+        results = []
+        total_matches = 0
+        total_replaced = 0
+
+        for book in self.list_books(story_slug):
+            chapters = self.list_chapters(story_slug, book.id)
+            for ch in chapters:
+                prose = self.read_chapter_prose(story_slug, book.id, ch.id)
+                if not prose:
+                    continue
+
+                matches = list(pattern.finditer(prose))
+                if not matches:
+                    continue
+
+                chapter_result = {
+                    "book_id": book.id,
+                    "book_title": book.title,
+                    "chapter_id": ch.id,
+                    "chapter_title": ch.title,
+                    "match_count": len(matches),
+                    "contexts": [],
+                }
+
+                for m in matches[:5]:
+                    start = max(0, m.start() - 40)
+                    end = min(len(prose), m.end() + 40)
+                    chapter_result["contexts"].append({
+                        "offset": m.start(),
+                        "before": prose[start:m.start()],
+                        "match": prose[m.start():m.end()],
+                        "after": prose[m.end():end],
+                    })
+
+                total_matches += len(matches)
+
+                if not dry_run and replace_text:
+                    new_prose, n = pattern.subn(replace_text, prose)
+                    if n > 0:
+                        self.save_chapter_prose(story_slug, book.id, ch.id, new_prose)
+                        total_replaced += n
+                        chapter_result["replaced"] = True
+
+                results.append(chapter_result)
+
+        return {
+            "total_matches": total_matches,
+            "total_replaced": total_replaced,
+            "chapters": results,
+        }

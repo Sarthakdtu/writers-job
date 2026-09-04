@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import {
   X, Loader2, Sparkles, AlertCircle, CheckCircle, HelpCircle,
-  ChevronDown, ChevronUp, Play, Pause, FileText, Settings, Zap, RotateCcw, Image as ImageIcon, Trash2, Lock,
+  ChevronDown, ChevronUp, Play, Pause, FileText, Settings, Zap, RotateCcw, Image as ImageIcon, Trash2, Lock, XCircle,
 } from 'lucide-react';
 import { AiHelpModal } from './AiHelpModal';
 import { useStory } from '../context/StoryContext';
 import { useSkillLevel } from '../context/SkillLevelContext';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import SaveAsChapter from './SaveAsChapter';
+import { CharacterPicker } from './CharacterPicker';
 
 const TAB_LABELS = {
   outliner: 'Outliner',
@@ -25,8 +27,17 @@ const SKILL_EMOJI = {
   character_trajectory: '📈', character_consistency: '👤', dialogue_voice: '💬',
   gap_finder: '🔍', arc_trajectories: '🎯', pov_balance: '👁️', twist_check: '🌀',
   prose_critique: '✒️', continue_writing: '➡️', continuity_check: '🔗', show_tell: '🎭',
+  chapter_draft: '📝',
+  chapter_art: '🎨',
   handwriting_ocr: '📝', concept_art_caption: '🖼️', sticky_notes_dump: '🗒️',
 };
+
+const JOB_CATEGORIES = [
+  { key: 'running', label: 'Running', statuses: ['pending', 'running'], color: 'text-[var(--accent)]' },
+  { key: 'success', label: 'Success', statuses: ['done'], color: 'text-emerald-400' },
+  { key: 'failed', label: 'Failed', statuses: ['error'], color: 'text-rose-400' },
+  { key: 'cancelled', label: 'Cancelled', statuses: ['cancelled', 'interrupted'], color: 'text-amber-400' },
+];
 
 const STAGE_LABELS = {
   'Asking the editor…': 'Asking the editor…',
@@ -67,7 +78,7 @@ export const AIPanel = ({ isOpen, onClose }) => {
   const [scopeChars, setScopeChars] = useState([]);
   const [scopeChapters, setScopeChapters] = useState([]);
 
-  const tabs = ['outliner', 'editor', 'world', 'characters', 'dashboard', 'quotes', 'home'];
+  const tabs = ['outliner', 'editor', 'world', 'characters', 'dashboard', 'quotes', 'home', 'jobs'];
 
   const safeStory = activeStory?.id ? activeStory : null;
 
@@ -372,36 +383,119 @@ export const AIPanel = ({ isOpen, onClose }) => {
                   }`}
                 >
                   {activeTab === tab && <Zap className="h-3 w-3" />}
-                  {TAB_LABELS[tab]}
+                  {TAB_LABELS[tab] || (tab === 'jobs' ? 'Jobs' : tab)}
+                  {tab === 'jobs' && jobs.some((j) => j.status === 'running' || j.status === 'pending') && (
+                    <span className="ml-1 px-1.5 py-0.5 rounded-full bg-[var(--accent)]/20 text-[var(--accent)] text-[9px] font-bold leading-none">
+                      {jobs.filter((j) => j.status === 'running' || j.status === 'pending').length}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
 
-            {/* Skills */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-2">
-              {pipelines.length === 0 && (
-                <div className="flex flex-col items-center justify-center gap-2 text-[var(--text-dim)] py-10 animate-in fade-in">
-                  <HelpCircle className="h-8 w-8 opacity-50" />
-                  <p className="text-xs text-center">No AI skills for this tab.</p>
-                </div>
-              )}
+            {/* Skills or Jobs */}
+            {activeTab === 'jobs' ? (
+              <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                {jobs.length === 0 && (
+                  <div className="flex flex-col items-center justify-center gap-2 text-[var(--text-dim)] py-10 animate-in fade-in">
+                    <FileText className="h-8 w-8 opacity-50" />
+                    <p className="text-xs text-center">No jobs yet. Run a skill to see activity here.</p>
+                  </div>
+                )}
+                {JOB_CATEGORIES.map((cat) => {
+                  const catJobs = jobs.filter((j) => cat.statuses.includes(j.status));
+                  if (catJobs.length === 0) return null;
+                  return (
+                    <div key={cat.key}>
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className={`text-[11px] font-semibold uppercase tracking-wider ${cat.color}`}>{cat.label}</span>
+                        <span className="text-[10px] text-[var(--text-dim)]">({catJobs.length})</span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {catJobs.map((j) => {
+                          const skillDef = pipelines.find((p) => p.id === j.pipeline);
+                          const skillName = skillDef?.name || j.pipeline;
+                          const emoji = SKILL_EMOJI[j.pipeline] || (skillDef?.is_custom ? '✨' : '🤖');
+                          const isJobRunning = j.status === 'running';
+                          const isJobPending = j.status === 'pending';
+                          const isJobBusy = isJobRunning || isJobPending;
+                          const isJobDone = j.status === 'done';
+                          const isJobError = j.status === 'error';
+                          const elapsed = isJobRunning && j.started_at
+                            ? Math.max(0, Math.round((Date.now() - Date.parse(j.started_at)) / 1000))
+                            : null;
+                          return (
+                            <div
+                              key={j.id}
+                              className={`rounded-xl border px-3 py-2.5 transition-all ${
+                                isJobRunning
+                                  ? 'border-[var(--accent)]/40 bg-[var(--accent)]/5'
+                                  : 'border-[var(--border-color)] bg-[var(--bg-card)]'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm shrink-0">{emoji}</span>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[13px] font-semibold text-[var(--text-main)] truncate">{skillName}</span>
+                                    {isJobRunning && <Loader2 className="h-3 w-3 animate-spin text-[var(--accent)] shrink-0" />}
+                                    {isJobPending && <Pause className="h-3 w-3 text-amber-400 shrink-0" />}
+                                    {isJobDone && <CheckCircle className="h-3 w-3 text-emerald-400 shrink-0" />}
+                                    {isJobError && <AlertCircle className="h-3 w-3 text-rose-400 shrink-0" />}
+                                    {(j.status === 'cancelled' || j.status === 'interrupted') && <XCircle className="h-3 w-3 text-amber-400 shrink-0" />}
+                                  </div>
+                                  <div className="text-[11px] text-[var(--text-dim)] flex items-center gap-1.5 flex-wrap mt-0.5">
+                                    {j.model && <span className="font-mono">{j.model}</span>}
+                                    {j.started_at && <span>· {new Date(j.started_at).toLocaleTimeString()}</span>}
+                                    {elapsed !== null && <span>· {elapsed}s</span>}
+                                    {j.stage && STAGE_LABELS[j.stage] && <span>· {STAGE_LABELS[j.stage]}</span>}
+                                  </div>
+                                  {j.error_message && (
+                                    <div className="text-[11px] text-rose-400 bg-rose-400/10 rounded-lg px-2 py-1 mt-1.5">{j.error_message}</div>
+                                  )}
+                                </div>
+                                {isJobBusy && (
+                                  <button
+                                    onClick={() => cancelJob(j.id)}
+                                    className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium border border-[var(--border-color)] bg-[var(--bg-base)] text-[var(--text-muted)] hover:border-rose-400 hover:text-rose-400 shrink-0 transition-colors"
+                                  >
+                                    Cancel
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                {pipelines.length === 0 && (
+                  <div className="flex flex-col items-center justify-center gap-2 text-[var(--text-dim)] py-10 animate-in fade-in">
+                    <HelpCircle className="h-8 w-8 opacity-50" />
+                    <p className="text-xs text-center">No AI skills for this tab.</p>
+                  </div>
+                )}
 
-              {pipelines.map((p) => {
-                const enabled = p.enabled;
-                const job = jobFor(p.id);
-                const isRunning = job?.status === 'running';
-                const isPending = job?.status === 'pending';
-                const isError = job?.status === 'error';
-                const isCancelled = job?.status === 'cancelled';
-                const isDone = job?.status === 'done';
-                const isExpanded = expanded.has(p.id);
-                const res = results[p.id];
-                const skillImages = images[p.id] || [];
-                const busy = isRunning || isPending;
+                {pipelines.map((p) => {
+                  const enabled = p.enabled;
+                  const job = jobFor(p.id);
+                  const isRunning = job?.status === 'running';
+                  const isPending = job?.status === 'pending';
+                  const isError = job?.status === 'error';
+                  const isCancelled = job?.status === 'cancelled';
+                  const isDone = job?.status === 'done';
+                  const isExpanded = expanded.has(p.id);
+                  const res = results[p.id];
+                  const skillImages = images[p.id] || [];
+                  const busy = isRunning || isPending;
 
-                const elapsed = isRunning && job?.started_at
-                  ? Math.max(0, Math.round((Date.now() - Date.parse(job.started_at)) / 1000))
-                  : null;
+                  const elapsed = isRunning && job?.started_at
+                    ? Math.max(0, Math.round((Date.now() - Date.parse(job.started_at)) / 1000))
+                    : null;
 
                 return (
                   <div
@@ -452,6 +546,16 @@ export const AIPanel = ({ isOpen, onClose }) => {
                           {p.family === 'import' && <span className="px-1.5 py-0.5 rounded bg-sky-400/15 text-sky-400 text-[9px]">import</span>}
                         </div>
 
+                        {p.required_models && p.required_models.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-[10px] text-[var(--text-dim)] font-semibold uppercase">Models:</span>
+                            {p.required_models.map((m) => (
+                              <span key={m} className="px-1.5 py-0.5 rounded bg-[var(--bg-hover)] text-[var(--text-muted)]
+                                text-[10px] font-mono border border-[var(--border-subtle)]">{m}</span>
+                            ))}
+                          </div>
+                        )}
+
                         {/* image attach */}
                         {p.needs_images && (
                           <div className="space-y-1.5">
@@ -480,17 +584,18 @@ export const AIPanel = ({ isOpen, onClose }) => {
                         {/* Quick Run scope */}
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider shrink-0">Focus on:</span>
-                          <select
-                            value={runScope[p.id]?.character_id || ''}
-                            onChange={(e) => setRunScope((prev) => ({
-                              ...prev,
-                              [p.id]: { ...prev[p.id], character_id: e.target.value || undefined },
-                            }))}
-                            className="px-2 py-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] text-[11px] text-[var(--text-main)] focus:outline-none focus:border-[var(--accent)] max-w-[140px]"
-                          >
-                            <option value="">All characters</option>
-                            {scopeChars.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                          </select>
+                          <div className="min-w-[140px]">
+                            <CharacterPicker
+                              characters={scopeChars}
+                              selected={runScope[p.id]?.character_id || ''}
+                              onSelect={(id) => setRunScope((prev) => ({
+                                ...prev,
+                                [p.id]: { ...prev[p.id], character_id: id || undefined },
+                              }))}
+                              placeholder="All characters"
+                              compact
+                            />
+                          </div>
                           <select
                             value={runScope[p.id]?.chapter_id || ''}
                             onChange={(e) => {
@@ -565,6 +670,11 @@ export const AIPanel = ({ isOpen, onClose }) => {
                                 {res.content}
                               </ReactMarkdown>
                             </div>
+                            <SaveAsChapter
+                              storyId={safeStory.id}
+                              result={res}
+                              hidden={res.content?.trim().startsWith('![')}
+                            />
                           </div>
                         )}
                       </div>
@@ -573,6 +683,7 @@ export const AIPanel = ({ isOpen, onClose }) => {
                 );
               })}
             </div>
+            )}
           </>
         )}
       </div>

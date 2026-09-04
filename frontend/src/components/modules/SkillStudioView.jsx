@@ -7,6 +7,7 @@ import { useStory } from '../../context/StoryContext';
 import { useSkillLevel } from '../../context/SkillLevelContext';
 import { AiHelpModal } from '../../components/AiHelpModal';
 import { EntityFocusPicker } from '../../components/EntityFocusPicker';
+import SaveAsChapter from '../../components/SaveAsChapter';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -46,6 +47,7 @@ const SKILL_EMOJI = {
   character_trajectory: '📈', character_consistency: '👤', dialogue_voice: '💬',
   gap_finder: '🔍', arc_trajectories: '🎯', pov_balance: '👁️', twist_check: '🌀',
   prose_critique: '✒️', continue_writing: '➡️', continuity_check: '🔗', show_tell: '🎭',
+  chapter_draft: '📝',
   handwriting_ocr: '📝', concept_art_caption: '🖼️', sticky_notes_dump: '🗒️',
 };
 
@@ -148,6 +150,7 @@ export const SkillStudioView = () => {
   const [builtinSearch, setBuiltinSearch] = useState('');
   const [selectedBuiltin, setSelectedBuiltin] = useState(null);
   const [jobPage, setJobPage] = useState(0);
+  const [jobFilter, setJobFilter] = useState('all');
 
   const filteredBuiltins = builtinSearch.trim()
     ? builtins.filter((p) => (p.name + ' ' + p.description).toLowerCase().includes(builtinSearch.toLowerCase()))
@@ -515,7 +518,17 @@ export const SkillStudioView = () => {
             ) : jobs.length === 0 ? (
               <p className="text-[10px] text-[var(--text-dim)]">No jobs yet — run a skill to see it here.</p>
             ) : (() => {
-              const sorted = jobs.slice().sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+              const JOB_FILTERS = [
+                { key: 'all', label: 'All', color: '' },
+                { key: 'running', label: 'Running', color: 'text-[var(--accent)]', statuses: ['pending', 'running'] },
+                { key: 'success', label: 'Done', color: 'text-emerald-400', statuses: ['done'] },
+                { key: 'failed', label: 'Failed', color: 'text-rose-400', statuses: ['error'] },
+                { key: 'cancelled', label: 'Cancelled', color: 'text-[var(--text-dim)]', statuses: ['cancelled', 'interrupted'] },
+              ];
+              const activeFilter = JOB_FILTERS.find((f) => f.key === jobFilter);
+              const sorted = jobs
+                .filter((j) => !activeFilter?.statuses || activeFilter.statuses.includes(j.status))
+                .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
               const pageCount = Math.max(1, Math.ceil(sorted.length / 5));
               const cur = jobPage >= pageCount ? pageCount - 1 : jobPage;
               const pageJobs = sorted.slice(cur * 5, cur * 5 + 5);
@@ -528,6 +541,27 @@ export const SkillStudioView = () => {
               }
               return (
                 <>
+                  <div className="flex items-center gap-1 overflow-x-auto pb-1.5 mb-2 -mx-1 px-1">
+                    {JOB_FILTERS.map((f) => {
+                      const count = f.key === 'all'
+                        ? jobs.length
+                        : jobs.filter((j) => f.statuses.includes(j.status)).length;
+                      return (
+                        <button
+                          key={f.key}
+                          onClick={() => { setJobFilter(f.key); setJobPage(0); }}
+                          className={`shrink-0 px-2 py-1 rounded-lg text-[10px] font-medium transition-colors border ${
+                            jobFilter === f.key
+                              ? 'bg-[var(--accent-light)] text-[var(--accent)] border-[var(--accent)]/40'
+                              : 'text-[var(--text-muted)] border-[var(--border-color)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]'
+                          }`}
+                        >
+                          {f.label}
+                          <span className={`ml-1 text-[9px] ${jobFilter === f.key ? 'text-[var(--accent)]' : 'text-[var(--text-dim)]'}`}>{count}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-[9px] text-[var(--text-dim)]">{sorted.length} jobs</span>
                     {pageCount > 1 && (
@@ -540,11 +574,14 @@ export const SkillStudioView = () => {
                       </div>
                     )}
                   </div>
+                  {sorted.length === 0 && (
+                    <p className="text-[10px] text-[var(--text-dim)] text-center py-4">No jobs in this category.</p>
+                  )}
                   <div className="space-y-2">
                     {groups.map((g) => {
                       const info = jobPipeline(g.jobs[0], customs, builtins);
                       return (
-                        <div key={`${cur}-${g.key}`}>
+                        <div key={`${cur}-${g.key}-${jobFilter}`}>
                           <div className="flex items-center gap-1.5 mb-1">
                             <span className="text-sm">{info.emoji}</span>
                             <span className="text-[10px] font-semibold text-[var(--text-muted)] truncate flex-1">{info.name}</span>
@@ -1055,6 +1092,7 @@ const TestOutput = ({ storyId, job }) => {
         <span className="font-mono text-[10px] text-[var(--text-dim)]">{result.created_at}</span>
       </div>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdStyle}>{result.content}</ReactMarkdown>
+      <SaveAsChapter storyId={storyId} result={result} />
     </div>
   );
 };

@@ -180,17 +180,17 @@ class EntityMerger:
 
         # mechanics — only touch if the model returned meaningful content
         if result.magic_system.strip() or result.technology_level.strip() or result.global_rules:
-            mech = self.fm.get_world_mechanics(story_id)
-            if result.magic_system.strip():
-                mech.magic_system = result.magic_system.strip()
-            if result.technology_level.strip():
-                mech.technology_level = result.technology_level.strip()
-            existing_rules = [r.strip() for r in mech.global_rules]
-            for rule in result.global_rules:
-                rule = rule.strip()
-                if rule and rule not in existing_rules:
-                    mech.global_rules.append(rule)
-            self.fm.save_world_mechanics(story_id, mech)
+            mech_list = self.fm.get_world_mechanics(story_id)
+            title = result.magic_system.strip() or result.technology_level.strip() or "Extracted World Mechanics"
+            mechanics = WorldMechanics(
+                id=slugify(title)[:60] or "extracted-world-mechanics",
+                name=title[:60],
+                magic_system=result.magic_system.strip(),
+                technology_level=result.technology_level.strip(),
+                global_rules=[r.strip() for r in result.global_rules if r.strip()],
+            )
+            mech_list.append(mechanics)
+            self.fm.save_world_mechanics(story_id, mech_list)
             counts["mechanics"] = 1
 
         return counts

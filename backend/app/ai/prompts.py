@@ -69,12 +69,12 @@ TASKS: Dict[str, str] = {
         "Output structure:\n## Rule gaps\n## Deus-ex risk\n## Power balance"
     ),
     "world_scene_ideas": (
-        "For each city or faction in the context, give 2–3 concrete, scene-settable sensory "
+        "For each city or faction in the context, give 2-3 concrete, scene-settable sensory "
         "or social details that make it feel alive.\n\n"
         "Output structure:\n### <city or faction name>\n- detail bullets"
     ),
     "character_trajectory": (
-        "For the target character, recommend the next arc segment: motivation gaps, 2–3 "
+        "For the target character, recommend the next arc segment: motivation gaps, 2-3 "
         "concrete milestones, a believable conflict that forces growth, and how it touches "
         "the story theme.\n\n"
         "Output structure:\n## Motivation gap\n## Suggested milestones\n## Conflict engine\n"
@@ -118,7 +118,7 @@ TASKS: Dict[str, str] = {
         "Output structure:\n## Strengths\n## Cuts & rewrites (quote → fix)\n## Voice"
     ),
     "continue_writing": (
-        "Continue the scene in the same voice for 2–3 paragraphs, advancing toward the "
+        "Continue the scene in the same voice for 2-3 paragraphs, advancing toward the "
         "attached beat if one is provided. Output only the continuation prose."
     ),
     "continuity_check": (
@@ -130,16 +130,6 @@ TASKS: Dict[str, str] = {
         "Point to specific 'telling' sentences in the chapter and give a one-line 'showing' "
         "alternative for each.\n\n"
         "Output structure:\n### Told → shown\n- told: …\n- shown: …",
-    ),
-    "perspective_rewrite": (
-        "Rewrite the SELECTED PASSAGE below into the requested point of view, keeping its "
-        "facts, events, and emotional content intact.\n\n"
-        "Perspective instruction (use exactly this):\n{{perspective}}\n\n"
-        "Rewrite the passage and output ONLY the rewritten prose — no headings, no "
-        "explanations, no commentary. Match the tense and detail level of the original. "
-        "Preserve any inline Markdown formatting. Do not invent events that are not in the "
-        "selection.\n\n"
-        "SELECTED PASSAGE:\n{{selection}}"
     ),
 
     # import / extract steps
@@ -161,37 +151,12 @@ TASKS: Dict[str, str] = {
         "the same note, drop illegible ones, and sort into a tidy grouped bullet list."
     ),
     "art_describe": (
-        "Describe this concept art in 2–3 sentences: subject, mood, palette, and key "
+        "Describe this concept art in 2-3 sentences: subject, mood, palette, and key "
         "details a writer would want captured."
     ),
     "art_polish": (
         "Rewrite the caption above as lore-appropriate, gallery-ready prose for a fiction "
-        "worldbuilding gallery (2–4 sentences, evocative but concrete)."
-    ),
-
-    # Notion import enrichment (see plans/notion-import-pipeline.md Stage C)
-    "notion_classify": (
-        "Below is a paragraph-by-paragraph draft chapter extracted from a writer's raw "
-        "Notion notes. Classify each paragraph. PROSE means finished or near-finished "
-        "narrative writing. NOTE means outline/planning text (stage directions, story "
-        "ideas, 'show that…', 'describe…', plot notes, meta-commentary).\n\n"
-        "Return strict JSON only:\n"
-        "{\"prose\": [<array of paragraph strings, verbatim>], "
-        "\"notes\": [<array of paragraph strings, verbatim>]}"
-        "\nPreserve paragraphs exactly; do not edit or summarize them."
-    ),
-    "notion_extract": (
-        "From the story text below (prose chapters and outline notes), extract the story's "
-        "core entities so they can populate a worldbuilding database.\n\n"
-        "Return strict JSON only, with these EXACT keys (empty arrays when none):\n"
-        "{\n"
-        "  \"tags\": [short genre/theme tags as strings],\n"
-        "  \"characters\": [{\"name\": str, \"role\": str, \"bio\": str}],\n"
-        "  \"cities\": [{\"name\": str, \"region\": str, \"atmosphere\": str}],\n"
-        "  \"factions\": [{\"name\": str, \"description\": str, \"leader\": str, \"alignment\": str}],\n"
-        "  \"plot_beats\": [{\"title\": str, \"description\": str}]\n"
-        "}\n"
-        "Only include entities that actually appear in the text. Do not invent."
+        "worldbuilding gallery (2-4 sentences, evocative but concrete)."
     ),
 
     # custom skill placeholder (prompt arrives from the stored skill; key is its id)
@@ -204,8 +169,6 @@ STAGE_LABELS: Dict[str, str] = {
     "notes_group": "Grouping notes…",
     "art_describe": "Describing the art…",
     "art_polish": "Polishing the caption…",
-    "notion_classify": "Classifying prose vs notes…",
-    "notion_extract": "Extracting characters & worldbuilding…",
 }
 
 ROUTER_SYSTEM = (
@@ -267,8 +230,6 @@ def step_messages(
     custom_prompt: Optional[str] = None,
     input_kind: str = "story_context",
     attach_context: bool = True,
-    selection: str = "",
-    perspective: str = "",
 ) -> List[Dict[str, Any]]:
     """Compose system+user messages for a single pipeline step."""
     if prompt_key in ("ocr_extract", "ocr_extract_all", "art_describe"):
@@ -283,44 +244,10 @@ def step_messages(
             {"role": "user", "content": f"{prev_output}\n\n{TASKS.get(prompt_key, '')}"},
         ]
 
-    if prompt_key in ("notion_classify", "notion_extract"):
-        task = TASKS.get(prompt_key, "")
-        if prev_output:
-            task = f"{task}\n\nSource text:\n{prev_output}"
-        return [
-            {"role": "system", "content": SYSTEM_PREFIXES["extract"]},
-            {"role": "user", "content": task},
-        ]
-
     if prompt_key == "art_polish":
         return [
             {"role": "system", "content": SYSTEM_PREFIXES["creative"]},
             {"role": "user", "content": f"{prev_output}\n\n{TASKS.get(prompt_key, '')}"},
-        ]
-
-    if prompt_key == "perspective_rewrite":
-        task = TASKS.get(prompt_key, "")
-        task = task.replace("{{perspective}}", perspective or "Narrator omniscient point of view")
-        task = task.replace("{{selection}}", selection or "(no passage selected)")
-        if context:
-            task = f"{task}\n\nStory context (JSON):\n{context}"
-        return [
-            {"role": "system", "content": SYSTEM_PREFIXES["creative"]},
-            {"role": "user", "content": task},
-        ]
-
-    if prompt_key == "chapter_interconnect":
-        # The user's judging criteria arrive in `selection`; the chapter range + prose
-        # + beats + characters arrive in `context`. Always attach the analysis role.
-        task = selection.strip() or (
-            "Assess how well the plot progresses across these chapters and how "
-            "interconnected they are."
-        )
-        if context:
-            task = f"Story context (JSON):\n{context}\n\n---\n\n{task}"
-        return [
-            {"role": "system", "content": SYSTEM_PREFIXES["analysis"]},
-            {"role": "user", "content": task},
         ]
 
     if custom_prompt:

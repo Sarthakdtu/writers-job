@@ -18,6 +18,7 @@ import {
   Link as LinkIcon,
   ImageIcon,
   Gem,
+  Zap,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
@@ -26,12 +27,15 @@ import {
   MapPin,
   Quote,
   Search,
-  GripVertical
+  GripVertical,
+  Heart,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
 import { ArtifactFormModal } from '../ArtifactFormModal';
 import { useEntityMention } from './entityRef/EntityMentionPicker';
 import { EntityReferenceText } from './entityRef/EntityReference';
+import { trackRecentEdit } from '../../utils/recentlyEdited';
 
 export const CharacterRosterView = () => {
   const { activeStory } = useStory();
@@ -80,6 +84,10 @@ export const CharacterRosterView = () => {
   const [attachArtifactId, setAttachArtifactId] = useState('');
   const [defaultBelongsTo, setDefaultBelongsTo] = useState([]);
 
+  // Mechanics state
+  const [storyMechanics, setStoryMechanics] = useState([]);
+  const [attachMechanicId, setAttachMechanicId] = useState('');
+
   // Gallery lightbox
   const [lightboxIndex, setLightboxIndex] = useState(null);
 
@@ -99,13 +107,35 @@ export const CharacterRosterView = () => {
   const [editingQuoteIdx, setEditingQuoteIdx] = useState(null);
   const [editingQuoteDraft, setEditingQuoteDraft] = useState('');
 
+  // Character relationships (inline editor)
+  const [showRelInput, setShowRelInput] = useState(false);
+  const [relForm, setRelForm] = useState({ character_id: '', label: '' });
+  const [editingRelIdx, setEditingRelIdx] = useState(null);
+  const [editingRelForm, setEditingRelForm] = useState({ character_id: '', label: '' });
+
   // Active detail tab (Notes is the default view)
   const [activeDetailTab, setActiveDetailTab] = useState('notes');
 
-  // Roster search
+  // Roster search & click tracking
   const [searchQuery, setSearchQuery] = useState('');
+  const [rosterClicks, setRosterClicks] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('loresmith_roster_clicks_v1') || '{}');
+    } catch { return {}; }
+  });
+  const [letterFilter, setLetterFilter] = useState(null);
 
-  const filteredCharacters = characters.filter((char) => {
+  const getClickCount = (charId) => rosterClicks[`${activeStory?.id}:${charId}`] || 0;
+
+  const bumpClick = (char) => {
+    if (!activeStory) return;
+    const key = `${activeStory.id}:${char.id}`;
+    const next = { ...rosterClicks, [key]: (rosterClicks[key] || 0) + 1 };
+    setRosterClicks(next);
+    localStorage.setItem('loresmith_roster_clicks_v1', JSON.stringify(next));
+  };
+
+  const searchedCharacters = characters.filter((char) => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return true;
     return (
@@ -115,12 +145,30 @@ export const CharacterRosterView = () => {
     );
   });
 
+  const filteredCharacters = (() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (q) return searchedCharacters;
+    let pool = [...characters];
+    if (letterFilter) {
+      pool = pool.filter((c) => (c.name || '').charAt(0).toUpperCase() === letterFilter);
+    } else {
+      pool.sort((a, b) => getClickCount(b.id) - getClickCount(a.id));
+      pool = pool.slice(0, 10);
+    }
+    return pool;
+  })();
+
+  const uniqueLetters = [...new Set(characters.map((c) => (c.name || '').charAt(0).toUpperCase()))].sort();
+  const hasMoreThan10 = !searchQuery.trim() && characters.length > 10;
+
   const detailTabs = [
     { id: 'notes', label: 'Notes', icon: StickyNote },
     { id: 'quotes', label: 'Quotes', icon: Quote },
+    { id: 'relationships', label: 'Relationships', icon: Heart },
     { id: 'timeline', label: 'Timeline', icon: Clock },
     { id: 'gallery', label: 'Gallery', icon: ImageIcon },
     { id: 'artifacts', label: 'Artifacts', icon: Gem },
+    { id: 'mechanics', label: 'Mechanics', icon: Zap },
     { id: 'appearances', label: 'Appearances', icon: Layers },
   ];
 
@@ -132,8 +180,13 @@ export const CharacterRosterView = () => {
       if (res.ok) {
         const data = await res.json();
         setCharacters(data);
-        if (data.length > 0 && !selectedChar) {
-          setSelectedChar(data[0]);
+        if (data.length > 0) {
+          const sorted = [...data].sort((a, b) => {
+            const ca = rosterClicks[`${activeStory.id}:${a.id}`] || 0;
+            const cb = rosterClicks[`${activeStory.id}:${b.id}`] || 0;
+            return cb - ca;
+          });
+          setSelectedChar(sorted[0]);
         }
       }
     } catch (err) {
@@ -184,10 +237,29 @@ export const CharacterRosterView = () => {
     }
   };
 
+  const fetchStoryMechanics = async () => {
+    if (!activeStory) return;
+    try {
+      const res = await fetch(`/api/stories/${activeStory.id}/world/mechanics`);
+      if (res.ok) {
+        const json = await res.json();
+        if (Array.isArray(json)) {
+          setStoryMechanics(json);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch story mechanics:', err);
+    }
+  };
+
   useEffect(() => {
     fetchCharacters();
     fetchStoryArtifacts();
     fetchStoryCities();
+    fetchStoryMechanics();
+    setSelectedChar(null);
+    setLetterFilter(null);
+    setSearchQuery('');
   }, [activeStory]);
 
   useEffect(() => {
@@ -217,6 +289,7 @@ export const CharacterRosterView = () => {
       fetchAppearances(selectedChar.id);
     }
     fetchStoryArtifacts();
+    fetchStoryMechanics();
   }, [selectedChar, activeStory]);
 
   // Close gallery lightbox with Escape
@@ -272,6 +345,7 @@ export const CharacterRosterView = () => {
         const saved = await res.json();
         setSelectedChar(saved);
         setCharacters((prev) => prev.map((c) => (c.id === saved.id ? saved : c)));
+        trackRecentEdit(activeStory.id, { type: 'character', id: saved.id, label: saved.name, tab: 'characters' });
         return saved;
       }
     } catch (err) {
@@ -408,6 +482,23 @@ export const CharacterRosterView = () => {
     });
   };
 
+  const handleAttachMechanic = async () => {
+    if (!selectedChar || !attachMechanicId) return;
+    await persistCharacter({
+      ...selectedChar,
+      mechanic_ids: [...new Set([...(selectedChar.mechanic_ids || []), attachMechanicId])],
+    });
+    setAttachMechanicId('');
+  };
+
+  const handleDetachMechanic = async (mechanicId) => {
+    if (!selectedChar) return;
+    await persistCharacter({
+      ...selectedChar,
+      mechanic_ids: (selectedChar.mechanic_ids || []).filter((id) => id !== mechanicId),
+    });
+  };
+
   const handleSaveCharacter = async (e) => {
     e.preventDefault();
     if (!activeStory || !charForm.name.trim()) return;
@@ -425,10 +516,12 @@ export const CharacterRosterView = () => {
       id: charId,
       timeline_events: isExisting ? selectedChar.timeline_events : [],
       plot_point_ids: isExisting ? selectedChar.plot_point_ids : [],
+      relationships: isExisting ? selectedChar.relationships || [] : [],
       gallery,
       notes: isExisting ? selectedChar.notes || [] : [],
       quotes: isExisting ? selectedChar.quotes || [] : [],
       artifact_ids: isExisting ? selectedChar.artifact_ids || [] : [],
+      mechanic_ids: isExisting ? selectedChar.mechanic_ids || [] : [],
     };
 
     try {
@@ -443,6 +536,7 @@ export const CharacterRosterView = () => {
         setCharacters((prev) => [...prev.filter((c) => c.id !== saved.id), saved]);
         setSelectedChar(saved);
         setShowCharModal(false);
+        trackRecentEdit(activeStory.id, { type: 'character', id: saved.id, label: saved.name, tab: 'characters' });
       }
     } catch (err) {
       console.error('Failed to save character:', err);
@@ -513,6 +607,42 @@ export const CharacterRosterView = () => {
       setEditingQuoteDraft('');
     }
   };
+
+  const handleAddRelationship = async () => {
+    if (!selectedChar || !relForm.character_id) return;
+    if (relForm.character_id === selectedChar.id) return;
+    const exists = (selectedChar.relationships || []).some(r => r.character_id === relForm.character_id);
+    if (exists) return;
+    const relationships = [...(selectedChar.relationships || []), { character_id: relForm.character_id, label: relForm.label.trim() }];
+    const saved = await persistCharacter({ ...selectedChar, relationships });
+    if (saved) {
+      setRelForm({ character_id: '', label: '' });
+      setShowRelInput(false);
+    }
+  };
+
+  const handleDeleteRelationship = async (idx) => {
+    if (!selectedChar) return;
+    const relationships = (selectedChar.relationships || []).filter((_, i) => i !== idx);
+    await persistCharacter({ ...selectedChar, relationships });
+  };
+
+  const startEditRelationship = (idx, rel) => {
+    setEditingRelIdx(idx);
+    setEditingRelForm({ character_id: rel.character_id, label: rel.label || '' });
+  };
+
+  const handleUpdateRelationship = async (idx) => {
+    if (!selectedChar) return;
+    const relationships = (selectedChar.relationships || []).map((r, i) => (i === idx ? { character_id: editingRelForm.character_id, label: editingRelForm.label.trim() } : r));
+    const saved = await persistCharacter({ ...selectedChar, relationships });
+    if (saved) {
+      setEditingRelIdx(null);
+      setEditingRelForm({ character_id: '', label: '' });
+    }
+  };
+
+  const otherCharacters = characters.filter(c => c.id !== selectedChar?.id);
 
   const startEditNote = (idx, text) => {
     setEditingNoteIdx(idx);
@@ -718,7 +848,13 @@ export const CharacterRosterView = () => {
       {!selectedChar && (
         <div className="space-y-4">
           <h3 className="font-prose text-lg font-bold text-[var(--text-main)] flex items-center justify-between">
-            <span>Roster ({filteredCharacters.length})</span>
+            <span>
+              {searchQuery.trim()
+                ? `Search (${filteredCharacters.length})`
+                : letterFilter
+                ? `Characters "${letterFilter}" (${filteredCharacters.length})`
+                : `Top ${filteredCharacters.length} Most Clicked`}
+            </span>
             <span className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-dim)]" />
               <input
@@ -743,13 +879,41 @@ export const CharacterRosterView = () => {
             </div>
           )}
 
+          {characters.length > 0 && hasMoreThan10 && !searchQuery.trim() && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                onClick={() => setLetterFilter(null)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all cursor-pointer ${
+                  !letterFilter
+                    ? 'bg-[var(--accent)] text-white shadow-md'
+                    : 'bg-[var(--bg-base)] text-[var(--text-muted)] border border-[var(--border-color)] hover:border-[var(--accent)] hover:text-[var(--accent)]'
+                }`}
+              >
+                Top {Math.min(10, characters.length)}
+              </button>
+              {uniqueLetters.map((letter) => (
+                <button
+                  key={letter}
+                  onClick={() => setLetterFilter(letter)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all cursor-pointer ${
+                    letterFilter === letter
+                      ? 'bg-[var(--accent)] text-white shadow-md'
+                      : 'bg-[var(--bg-base)] text-[var(--text-muted)] border border-[var(--border-color)] hover:border-[var(--accent)] hover:text-[var(--accent)]'
+                  }`}
+                >
+                  {letter}
+                </button>
+              ))}
+            </div>
+          )}
+
           {characters.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {filteredCharacters.map((char) => {
                 return (
                   <div
                     key={char.id}
-                    onClick={() => setSelectedChar(char)}
+                    onClick={() => { bumpClick(char); setSelectedChar(char); }}
                     className="literary-card rounded-2xl cursor-pointer transition-all hover:border-[var(--accent)] hover:shadow-md overflow-hidden"
                   >
                     <div className="h-44 w-full relative overflow-hidden bg-[var(--bg-base)]">
@@ -792,16 +956,41 @@ export const CharacterRosterView = () => {
               <Users className="h-3.5 w-3.5 text-[var(--accent)]" />
               <span>Cast Roster ({filteredCharacters.length}/{characters.length})</span>
             </span>
-            <span className="relative shrink-0">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-dim)]" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search cast..."
-                className="w-56 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] pl-8 pr-3 py-1.5 text-xs text-[var(--text-main)] placeholder:text-[var(--text-dim)] focus:border-[var(--accent)] focus:outline-hidden transition-colors"
-              />
-            </span>
+            <div className="flex items-center gap-1.5">
+              {hasMoreThan10 && !searchQuery.trim() && (
+                <div className="flex items-center gap-1 mr-2">
+                  <button
+                    onClick={() => setLetterFilter(null)}
+                    className={`rounded-md px-2 py-1 text-[10px] font-bold transition-all cursor-pointer ${
+                      !letterFilter ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-dim)] hover:text-[var(--accent)]'
+                    }`}
+                  >
+                    Top
+                  </button>
+                  {uniqueLetters.map((letter) => (
+                    <button
+                      key={letter}
+                      onClick={() => setLetterFilter(letter)}
+                      className={`rounded-md px-2 py-1 text-[10px] font-bold transition-all cursor-pointer ${
+                        letterFilter === letter ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-dim)] hover:text-[var(--accent)]'
+                      }`}
+                    >
+                      {letter}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <span className="relative shrink-0">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-dim)]" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search cast..."
+                  className="w-56 rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] pl-8 pr-3 py-1.5 text-xs text-[var(--text-main)] placeholder:text-[var(--text-dim)] focus:border-[var(--accent)] focus:outline-hidden transition-colors"
+                />
+              </span>
+            </div>
           </div>
           <div className="flex items-end gap-4 overflow-x-auto pb-1">
             {filteredCharacters.map((char) => {
@@ -809,7 +998,7 @@ export const CharacterRosterView = () => {
               return (
                 <button
                   key={char.id}
-                  onClick={() => setSelectedChar(char)}
+                  onClick={() => { bumpClick(char); setSelectedChar(char); }}
                   className="group flex shrink-0 flex-col items-center gap-1.5 cursor-pointer"
                   title={char.name}
                 >
@@ -1207,6 +1396,126 @@ export const CharacterRosterView = () => {
                     </div>
                   )}
 
+                  {activeDetailTab === 'relationships' && (
+                    <div className="literary-card rounded-2xl p-6 space-y-3">
+                      <div className="flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] pb-3">
+                        <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                          <Heart className="h-3.5 w-3.5 text-[var(--accent)]" />
+                          Relationships ({(selectedChar.relationships || []).length})
+                        </span>
+                        {!showRelInput && (
+                          <button
+                            onClick={() => setShowRelInput(true)}
+                            className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-[var(--accent-hover)] transition-all"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            Add Relationship
+                          </button>
+                        )}
+                      </div>
+
+                      {showRelInput && (
+                        <div className="flex items-end gap-2 p-3 rounded-xl border border-dashed border-[var(--accent)]/40 bg-[var(--accent-light)]/30">
+                          <div className="flex-1">
+                            <label className="block text-[10px] font-bold uppercase text-[var(--accent)] mb-1">Character</label>
+                            <select
+                              value={relForm.character_id}
+                              onChange={(e) => setRelForm({ ...relForm, character_id: e.target.value })}
+                              className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-1.5 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                            >
+                              <option value="">Select character...</option>
+                              {otherCharacters.map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="flex-1">
+                            <label className="block text-[10px] font-bold uppercase text-[var(--accent)] mb-1">Label (e.g. sibling, rival, mentor)</label>
+                            <input
+                              value={relForm.label}
+                              onChange={(e) => setRelForm({ ...relForm, label: e.target.value })}
+                              placeholder="e.g. sibling, rival, mentor, lover"
+                              className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-1.5 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                            />
+                          </div>
+                          <div className="flex gap-1">
+                            <button
+                              onClick={handleAddRelationship}
+                              disabled={!relForm.character_id}
+                              className="rounded-lg bg-[var(--accent)] p-1.5 text-white hover:bg-[var(--accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              <Check className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => { setShowRelInput(false); setRelForm({ character_id: '', label: '' }); }}
+                              className="rounded-lg p-1.5 text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        {(selectedChar.relationships || []).map((rel, idx) => {
+                          const targetChar = characters.find(c => c.id === rel.character_id);
+                          const targetName = targetChar?.name || rel.character_id;
+                          return (
+                            <div key={idx} className="group flex items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)] px-4 py-3 transition-all hover:border-[var(--accent)]/30">
+                              {editingRelIdx === idx ? (
+                                <>
+                                  <select
+                                    value={editingRelForm.character_id}
+                                    onChange={(e) => setEditingRelForm({ ...editingRelForm, character_id: e.target.value })}
+                                    className="flex-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-1.5 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                                  >
+                                    {otherCharacters.map(c => (
+                                      <option key={c.id} value={c.id}>{c.name}</option>
+                                    ))}
+                                  </select>
+                                  <input
+                                    value={editingRelForm.label}
+                                    onChange={(e) => setEditingRelForm({ ...editingRelForm, label: e.target.value })}
+                                    placeholder="Label"
+                                    className="flex-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-1.5 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                                  />
+                                  <button onClick={() => handleUpdateRelationship(idx)} className="rounded-md p-1 text-[var(--accent)] hover:bg-[var(--accent-light)]"><Check className="h-3.5 w-3.5" /></button>
+                                  <button onClick={() => { setEditingRelIdx(null); setEditingRelForm({ character_id: '', label: '' }); }} className="rounded-md p-1 text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500"><X className="h-3.5 w-3.5" /></button>
+                                </>
+                              ) : (
+                                <>
+                                  <div className="w-8 h-8 rounded-full bg-[var(--accent)] flex items-center justify-center text-xs font-bold text-white shrink-0">
+                                    {targetChar?.image_url ? (
+                                      <img src={targetChar.image_url} alt={targetName} className="h-full w-full rounded-full object-cover" />
+                                    ) : (
+                                      targetName.charAt(0).toUpperCase()
+                                    )}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-sm font-semibold text-[var(--text-main)] truncate">{targetName}</div>
+                                    {rel.label && (
+                                      <div className="text-[11px] text-[var(--accent)] font-medium">{rel.label}</div>
+                                    )}
+                                  </div>
+                                  <ArrowRightLeft className="h-3.5 w-3.5 text-[var(--text-dim)] shrink-0" />
+                                  <div className="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
+                                    <button onClick={() => startEditRelationship(idx, rel)} className="rounded-md p-1 text-[var(--text-dim)] hover:bg-[var(--accent-light)] hover:text-[var(--accent)]"><Edit3 className="h-3.5 w-3.5" /></button>
+                                    <button onClick={() => handleDeleteRelationship(idx)} className="rounded-md p-1 text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {(!selectedChar.relationships || selectedChar.relationships.length === 0) && !showRelInput && (
+                          <p className="text-xs text-[var(--text-dim)] italic text-center py-4">
+                            No relationships declared yet. Add sibling, rival, mentor, or lover connections.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {activeDetailTab === 'gallery' && (
                     <div className="literary-card rounded-2xl p-6 space-y-4">
                       <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
@@ -1480,6 +1789,123 @@ export const CharacterRosterView = () => {
                       ) : (
                         <div className="col-span-full p-4 text-center text-xs italic text-[var(--text-dim)] border-2 border-dashed border-[var(--border-color)] rounded-xl">
                           No artifacts attached yet. Create a new artifact or attach an existing story artifact.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {activeDetailTab === 'mechanics' && (() => {
+                const attachedMechanics = storyMechanics.filter((m) =>
+                  (selectedChar.mechanic_ids || []).includes(m.id)
+                );
+                const availableMechanics = storyMechanics.filter(
+                  (m) => !attachedMechanics.some((x) => x.id === m.id)
+                );
+                const mechDisplayName = (m) =>
+                  m.name || m.magic_system || 'Untitled Mechanics';
+
+                return (
+                  <div className="literary-card rounded-2xl p-6 space-y-4">
+                    <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
+                      <div className="flex items-center gap-2 font-semibold text-[var(--text-main)]">
+                        <Zap className="h-5 w-5 text-[var(--accent)]" />
+                        <span>Power &amp; Mechanics ({attachedMechanics.length})</span>
+                      </div>
+                    </div>
+
+                    {/* Attach existing mechanic */}
+                    {availableMechanics.length > 0 && (
+                      <div className="flex items-center gap-2 p-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-base)]">
+                        <select
+                          value={attachMechanicId}
+                          onChange={(e) => setAttachMechanicId(e.target.value)}
+                          className="flex-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                        >
+                          <option value="">Link an existing magic mechanics...</option>
+                          {availableMechanics.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {mechDisplayName(m)}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={handleAttachMechanic}
+                          disabled={!attachMechanicId}
+                          className="flex items-center gap-1 rounded-lg bg-[var(--accent-light)] px-3 py-2 text-xs font-semibold text-[var(--accent)] border border-[var(--border-subtle)] hover:bg-[var(--accent)] hover:text-white transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          <LinkIcon className="h-3.5 w-3.5" />
+                          <span>Link</span>
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {attachedMechanics.length > 0 ? (
+                        attachedMechanics.map((m) => (
+                          <div
+                            key={m.id}
+                            className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)] p-4 space-y-2"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <Zap className="h-4 w-4 text-[var(--accent)] shrink-0" />
+                                <h4 className="font-prose text-sm font-bold text-[var(--text-main)] truncate">
+                                  {mechDisplayName(m)}
+                                </h4>
+                              </div>
+                              <button
+                                onClick={() => handleDetachMechanic(m.id)}
+                                className="p-1.5 rounded-lg text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500 transition-colors shrink-0"
+                                title="Unlink from character"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                            {m.magic_system && (
+                              <div>
+                                <div className="text-[9px] font-bold uppercase text-[var(--text-dim)]">
+                                  Magic System / Energy Source
+                                </div>
+                                <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+                                  {m.magic_system}
+                                </p>
+                              </div>
+                            )}
+                            {m.technology_level && (
+                              <div>
+                                <div className="text-[9px] font-bold uppercase text-[var(--text-dim)]">
+                                  Technology Level
+                                </div>
+                                <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+                                  {m.technology_level}
+                                </p>
+                              </div>
+                            )}
+                            {m.global_rules && m.global_rules.length > 0 && (
+                              <div>
+                                <div className="text-[9px] font-bold uppercase text-[var(--text-dim)]">
+                                  Global Rules &amp; Limitations
+                                </div>
+                                <ul className="space-y-1">
+                                  {m.global_rules.map((rule, ri) => (
+                                    <li
+                                      key={ri}
+                                      className="flex items-start gap-1.5 text-xs text-[var(--text-muted)]"
+                                    >
+                                      <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-[var(--accent)]" />
+                                      <span>{rule}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="col-span-full p-4 text-center text-xs italic text-[var(--text-dim)] border-2 border-dashed border-[var(--border-color)] rounded-xl">
+                          No magic mechanics linked yet. Link existing world mechanics (powers, magic systems) to this character.
                         </div>
                       )}
                     </div>

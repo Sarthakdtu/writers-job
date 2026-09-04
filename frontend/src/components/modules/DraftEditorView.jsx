@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   FileText,
   Cloud,
@@ -25,13 +25,18 @@ import {
   Loader2,
   UserRound,
   UserRoundCog,
-  Lock
+  Lock,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
 import { useSkillLevel } from '../../context/SkillLevelContext';
+import { runChapterArt } from '../../utils/chapterArt';
+import { trackRecentEdit } from '../../utils/recentlyEdited';
 import ReactMarkdown from 'react-markdown';
 import { useEntityMention } from './entityRef/EntityMentionPicker';
 import { withEntityReferences } from './entityRef/EntityReference';
+import { CharacterPicker } from '../CharacterPicker';
 
 const markdownComponents = {
   p: ({ children }) => <p className="my-1">{children}</p>,
@@ -54,8 +59,18 @@ export const DraftEditorView = () => {
   const [selectedChId, setSelectedChId] = useState('');
   const [currentChapter, setCurrentChapter] = useState(null);
 
+  // Chapter Art (one-click generate cover)
+  const [artJob, setArtJob] = useState(null);
+  const [artError, setArtError] = useState('');
+
   // Mode: 'markdown' | 'gdocs'
   const [editorMode, setEditorMode] = useState('markdown');
+
+  // Chapter sort order: 'asc' (natural/reading) | 'desc' (newest first), persisted per story
+  const [sortDirection, setSortDirection] = useState(() => {
+    if (!activeStory) return 'asc';
+    return localStorage.getItem(`loresmith_chapter_sort_${activeStory.id}`) || 'asc';
+  });
 
   // Prose blocks (note-style, stacked on top of each other) & Autosave States
   const [blocks, setBlocks] = useState([]);
@@ -91,6 +106,12 @@ export const DraftEditorView = () => {
   // Entity references (@-mention picker + hover previews)
   const [entityRefs, setEntityRefs] = useState([]);
   const entityMention = useEntityMention(entityRefs);
+  const pollAliveRef = useRef(true);
+
+  useEffect(() => {
+    pollAliveRef.current = false;
+    return () => { pollAliveRef.current = true; };
+  }, []);
 
   // Fetch books
   useEffect(() => {
@@ -117,7 +138,7 @@ export const DraftEditorView = () => {
     if (!activeStory || !selectedBookId) return;
     const fetchChapters = async () => {
       try {
-        const res = await fetch(`/api/stories/${activeStory.id}/books/${selectedBookId}/chapters`);
+        const res = await fetch(`/api/stories/${activeStory.id}/books/${selectedBookId}/chapters?sort=${sortDirection}`);
         if (res.ok) {
           const data = await res.json();
           setChapters(data);
@@ -138,7 +159,11 @@ export const DraftEditorView = () => {
       }
     };
     fetchChapters();
-  }, [activeStory, selectedBookId]);
+  }, [activeStory, selectedBookId, sortDirection]);
+
+  useEffect(() => {
+    if (activeStory) localStorage.setItem(`loresmith_chapter_sort_${activeStory.id}`, sortDirection);
+  }, [sortDirection, activeStory]);
 
   // Load raw prose content & chapter metadata
   useEffect(() => {
@@ -285,6 +310,7 @@ export const DraftEditorView = () => {
       });
       if (res.ok) {
         setSaveState('saved');
+        trackRecentEdit(activeStory.id, { type: 'chapter', id: selectedChId, label: currentChapter?.title || selectedChId, tab: 'editor' });
       } else {
         setSaveState('unsaved');
       }
@@ -353,6 +379,50 @@ export const DraftEditorView = () => {
       }
     } catch (err) {
       console.error('Failed to save google doc id:', err);
+    }
+  };
+
+  const handleChapterArt = async () => {
+    if (!activeStory || !selectedBookId || !selectedChId) return;
+    setArtError('');
+    try {
+      const job = await runChapterArt({
+        storyId: activeStory.id,
+        bookId: selectedBookId,
+        chapterId: selectedChId,
+      });
+      setArtJob(job);
+      pollChapterArt(job.id);
+    } catch (err) {
+      setArtError(err.message || 'Could not start Chapter Art.');
+    }
+  };
+
+  const pollChapterArt = async (jobId, depth = 0) => {
+    if (!activeStory || !pollAliveRef.current) return;
+    if (depth > 300) { setArtJob(null); return; }
+    try {
+      const res = await fetch(`/api/ai/jobs/${activeStory.id}/${jobId}`);
+      if (res.ok) {
+        const job = await res.json();
+        setArtJob(job);
+        if (job.status === 'done') {
+          setTimeout(() => { setArtJob(null); }, 2500);
+          // refresh chapter metadata so the new image_url shows
+          const chRes = await fetch(`/api/stories/${activeStory.id}/books/${selectedBookId}/chapters/${selectedChId}`);
+          if (chRes.ok) setCurrentChapter(await chRes.json());
+          return;
+        }
+        if (job.status === 'error') {
+          setArtError(job.error_message || 'Generation failed.');
+          setTimeout(() => { setArtJob(null); }, 2500);
+          return;
+        }
+        if (job.status === 'cancelled') { setArtJob(null); return; }
+      }
+      setTimeout(() => pollChapterArt(jobId, depth + 1), 2000);
+    } catch (err) {
+      setTimeout(() => pollChapterArt(jobId, depth + 1), 2000);
     }
   };
 
@@ -518,6 +588,32 @@ export const DraftEditorView = () => {
                 </option>
               ))}
             </select>
+            {chapters.length > 1 && (
+              <div className="flex items-center gap-0.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-base)] p-0.5">
+                <button
+                  onClick={() => sortDirection !== 'asc' && setSortDirection('asc')}
+                  title="Sort chapters ascending"
+                  className={`flex items-center justify-center rounded-lg p-1 transition-all cursor-pointer ${
+                    sortDirection === 'asc'
+                      ? 'bg-[var(--accent)] text-white'
+                      : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]'
+                  }`}
+                >
+                  <ArrowUp className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => sortDirection !== 'desc' && setSortDirection('desc')}
+                  title="Sort chapters descending"
+                  className={`flex items-center justify-center rounded-lg p-1 transition-all cursor-pointer ${
+                    sortDirection === 'desc'
+                      ? 'bg-[var(--accent)] text-white'
+                      : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]'
+                  }`}
+                >
+                  <ArrowDown className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -574,6 +670,16 @@ export const DraftEditorView = () => {
         </div>
       )}
 
+      {currentChapter?.image_url && (
+        <div className="literary-card rounded-2xl overflow-hidden">
+          <img
+            src={currentChapter.image_url}
+            alt={currentChapter.title}
+            className="h-56 w-full object-cover"
+          />
+        </div>
+      )}
+
       {/* MODE 1: LOCAL MARKDOWN EDITOR */}
       {editorMode === 'markdown' && (
         <div className="literary-card rounded-2xl p-4 md:p-6 space-y-4">
@@ -604,6 +710,33 @@ export const DraftEditorView = () => {
                 <span className="inline-flex items-center gap-1 text-amber-600 font-semibold">
                   Unsaved changes...
                 </span>
+              )}
+
+              {canUse('ai.panel') && (
+                <>
+                  {artJob && (
+                    <span className="inline-flex items-center gap-1 text-[var(--accent)] font-semibold">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      {artJob.stage || 'Generating…'}
+                    </span>
+                  )}
+                  <button
+                    onClick={handleChapterArt}
+                    disabled={!!artJob || !currentChapter}
+                    className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[11px] font-semibold text-[var(--accent)] border border-[var(--border-color)] bg-[var(--bg-base)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Generate cover art from this chapter (AI)"
+                  >
+                    {artJob ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3.5 w-3.5" />
+                    )}
+                    <span>Cover Art</span>
+                  </button>
+                  {artError && (
+                    <span className="text-[11px] text-rose-400">{artError}</span>
+                  )}
+                </>
               )}
 
               <button
@@ -1035,18 +1168,14 @@ export const DraftEditorView = () => {
                 {perspectiveKind === 'character' && (
                   <div className="space-y-1.5">
                     <label className="block text-[11px] font-semibold text-[var(--text-muted)] mb-1">Whose persona?</label>
-                    <select
-                      value={perspectiveCharId}
-                      onChange={(e) => setPerspectiveCharId(e.target.value)}
-                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
-                    >
-                      {characters.length === 0 && <option value="">No characters yet</option>}
-                      {characters.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}{c.persona ? ' (persona)' : ''}
-                        </option>
-                      ))}
-                    </select>
+                    <CharacterPicker
+                      characters={characters}
+                      selected={perspectiveCharId}
+                      onSelect={setPerspectiveCharId}
+                      placeholder="Select character..."
+                      emptyMessage="No characters yet"
+                      compact
+                    />
                     {perspectiveCharId && (() => {
                       const ch = characters.find((c) => c.id === perspectiveCharId);
                       return ch?.persona ? (

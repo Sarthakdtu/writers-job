@@ -1,83 +1,168 @@
-# Walkthrough: Local-First Fiction Writer Suite
+# LoreSmith — The Fiction Writer's Creative Suite
 
-We have fully constructed and launched the local-first fiction writing application designed for fiction writers to manage worldbuilding, plot outlines, character arcs, and raw Markdown prose with Google Drive backup integration.
+**Plan your world. Write your story. Never lose a word.**
+
+LoreSmith is a powerful, local-first writing app built for fiction authors, worldbuilders, and storytellers. Manage characters, maps, timelines, plot arcs, and prose — all in one beautiful, distraction-free workspace. Your data lives on your machine. Your story stays yours.
 
 ---
 
-## 🛠️ Architecture Summary
+## Why Writers Love LoreSmith
 
-```mermaid
-flowchart TD
-    subgraph Frontend["React (Vite) + Tailwind CSS + Lucide Icons"]
-        Navbar["Navbar (Story Selector, Theme Switcher, Quick Search ⌘K, Backup Status)"]
-        Sidebar["Collapsible Sidebar (Dashboard, World, Characters, Outliner, Editor)"]
-        ThemeEngine["Theme Engine (Sepia Parchment, Midnight Ink, Typewriter Minimal)"]
-        AmbientBg["Ambient Background Layer (Dynamic Cross-Fade)"]
-        
-        Dashboard["1. Story Dashboard View"]
-        Worldbuilding["2. Worldbuilding Hub"]
-        Characters["3. Character Roster & Timeline Matrix"]
-        Outliner["4. Book Outliner & Subsections"]
-        Editor["5. Dual-Mode Prose Editor (Markdown + Embedded GDocs)"]
-    end
+- **Worldbuilding Made Easy** — Build cities, magic systems, factions, artifacts, and a living glossary. Every detail links together.
+- **Character Roster & Timeline** — Track every character with portraits, bios, timelines, and an appearances matrix that shows who shows up where.
+- **Plot Outlining & Beat Sheets** — Organize books, chapters, and scenes. Map plot beats to characters. Track character arcs across your entire series.
+- **Distraction-Free Writing** — Write in a clean Markdown editor with autosave, or switch to an embedded Google Docs mode. Your choice.
+- **One-Click Google Drive Backup** — Sync your entire writing project to Google Drive with a single click. Restore anytime.
+- **AI-Powered Tools** — Analyze characters, rewrite scenes, generate chapter art, and more — all running locally on your machine via Ollama. No cloud. No subscriptions.
+- **Your Data, Your Machine** — 100% local storage. No database required. No internet needed to write. Your files are plain JSON and Markdown — portable and future-proof.
 
-    subgraph Backend["Python (FastAPI) Backend"]
-        FileManager["FileManager & Lock Service (Atomic Writes & Thread Locks)"]
-        API["FastAPI REST Routes (/api/stories, /api/world, /api/books, /api/backup)"]
-        DriveEngine["Google Drive OAuth2 & Backup Engine"]
-    end
+---
 
-    subgraph Storage["100% Local File System Storage"]
-        StoryJSON["data/stories/[slug]/story.json"]
-        WorldJSON["data/stories/[slug]/world/ (cities, mechanics, factions, glossary)"]
-        CharJSON["data/stories/[slug]/characters/[id].json"]
-        BookJSON["data/stories/[slug]/books/book-[id]/ (book.json, plot.json, character_arcs.json)"]
-        ChapterMD["data/stories/[slug]/books/book-[id]/chapters/ch-[id].md"]
-    end
+## Beautiful Themes for Every Mood
 
-    Frontend --> API
-    API --> FileManager
-    FileManager --> Storage
-    DriveEngine --> Storage
+Choose from three literary themes designed to match your writing style:
+
+- **Sepia Parchment** — Warm, classic paper feel for long-form prose sessions.
+- **Midnight Ink** — Dark, immersive mode for late-night writing.
+- **Typewriter Minimal** — Clean monochrome for focused, no-frills drafting.
+
+---
+
+## What's Inside
+
+| Feature | What It Does |
+|---|---|
+| **Story Dashboard** | Overview of your story with summaries, fun facts, and custom banners. |
+| **Worldbuilding Hub** | Cities, magic systems, factions, artifacts, glossary, and a concept art gallery. |
+| **Character Roster** | Avatar cards, bios, timelines, linked powers, and an appearances matrix. |
+| **Character Map** | Interactive relationship graph showing how characters connect across your story. |
+| **Book Outliner** | Drag-and-drop chapter ordering, plot beats, character arcs, and a POV tracker. |
+| **Writing Editor** | Markdown editor with block-based editing, perspective rewrite, and Google Docs mode. |
+| **Quote Collector** | Save memorable lines and standalone quotes with tags and notes. |
+| **Concept Art Gallery** | Upload and organize concept art with lore context and tags. |
+| **Global Search** | Find any character, chapter, city, or book instantly with Cmd+K. |
+| **Universe Explorer** | Quick-access widget showing your most-used entities and their key details. |
+| **AI Skill Studio** | Create custom AI workflows, run built-in analysis pipelines, and generate chapter art. |
+| **Google Drive Backup** | One-click sync to your Google Drive. Restore with conflict resolution. |
+
+---
+
+## Get Started in 2 Minutes
+
+### What You Need
+
+- **Python 3.10+** installed on your computer
+- **Node.js 18+** installed on your computer
+- A terminal (Command Prompt on Windows, Terminal on Mac)
+
+### Step 1: Download & Install
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/writer_job.git
+cd writer_job
+
+# Install Python dependencies
+python3 -m venv .venv
+source .venv/bin/activate        # On Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+# Install frontend dependencies
+cd frontend
+npm install
+cd ..
 ```
 
----
+### Step 2: Launch LoreSmith
 
-## Key Modules Implemented
+Open **two terminal windows**:
 
-### 1. Data Architecture & Atomic File Storage ([`file_manager.py`](file:///Users/sarthaksri/Desktop/writer_job/backend/app/file_manager.py), [`file_utils.py`](file:///Users/sarthaksri/Desktop/writer_job/backend/app/file_utils.py))
-- Thread-safe and crash-safe atomic file writing (`os.replace` via temp files with `fsync` and canonical `threading.Lock`).
-- Manages directory structures under `/data/stories/[story-slug]/`.
+**Terminal 1 — Backend (the engine):**
+```bash
+PYTHONPATH=backend .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
 
-### 2. FastAPI REST Routes ([`main.py`](file:///Users/sarthaksri/Desktop/writer_job/backend/app/main.py))
-- Full CRUD for stories, character profiles, dynamic world sections (`cities`, `mechanics`, `factions`, `glossary`), multi-book structures, plot beats, character arcs, and raw Markdown chapter prose.
-- **Appearances Matrix Endpoint** (`/api/stories/{story_id}/characters/{char_id}/appearances`): Real-time filesystem scanner returning linked books, chapters (with POV flags), and plot beats.
-- **Google OAuth2 & Backup Endpoints** (`/api/auth/google`, `/api/backup/google-drive`, `/api/backup/status`).
+**Terminal 2 — Frontend (the app):**
+```bash
+cd frontend && npm run dev
+```
 
-### 3. Frontend Theme Engine & Ambient Atmosphere ([`ThemeContext.jsx`](file:///Users/sarthaksri/Desktop/writer_job/frontend/src/context/ThemeContext.jsx), [`AmbientBackground.jsx`](file:///Users/sarthaksri/Desktop/writer_job/frontend/src/components/AmbientBackground.jsx))
-- **3 Literary Themes**: *Sepia Parchment* (light paper), *Midnight Ink* (dark slate navy), and *Typewriter Minimal* (monochrome contrast).
-- **Google Fonts**: `Lora` / `EB Garamond` for serif prose and character cards, `Inter` for UI controls.
-- **Ambient Layer**: Smooth cross-fade transition overlay when `story.background_url` updates.
+### Step 3: Start Writing
 
-### 4. Interactive Modules
-- **Home** ([`HomeView.jsx`](file:///Users/sarthaksri/Desktop/writer_job/frontend/src/components/modules/HomeView.jsx)): All-stories gallery with dynamic background image picker, quick-add tags, and New Story creation.
-- **Story Dashboard** ([`DashboardView.jsx`](file:///Users/sarthaksri/Desktop/writer_job/frontend/src/components/modules/DashboardView.jsx)): Dedicated per-story view with a Story Overview (add/remove paragraphs), a random Summary · Fun Fact card, and the aesthetic theme picker.
-- **Character Roster & Appearances Matrix** ([`CharacterRosterView.jsx`](file:///Users/sarthaksri/Desktop/writer_job/frontend/src/components/modules/CharacterRosterView.jsx)): Avatar cards, local image upload or URL link, interactive vertical timeline component, and auto-scanned appearances matrix badges.
-- **Worldbuilding Hub & Concept Art Gallery** ([`WorldbuildingView.jsx`](file:///Users/sarthaksri/Desktop/writer_job/frontend/src/components/modules/WorldbuildingView.jsx)): Tabbed interface for Cities, Magic & Mechanics, Factions, Lexicon, and **Gallery & Concept Art** with lore context and local asset uploads.
-- **Book Outliner** ([`BookOutlinerView.jsx`](file:///Users/sarthaksri/Desktop/writer_job/frontend/src/components/modules/BookOutlinerView.jsx)): Tree view of Books → Chapters → Scenes, Plot Beats sheet, Character Arcs per book, and POV Tracker.
-- **Dual-Mode Writing Editor** ([`DraftEditorView.jsx`](file:///Users/sarthaksri/Desktop/writer_job/frontend/src/components/modules/DraftEditorView.jsx)): Local Markdown Editor with live preview & 1000ms debounced autosave + Embedded Google Docs iframe edit window.
-- **One-Click Backup Engine** ([`GoogleDriveModal.jsx`](file:///Users/sarthaksri/Desktop/writer_job/frontend/src/components/GoogleDriveModal.jsx)): Live sync status badge (`"In Sync"`, `"Syncing..."`, `"Error"`) and progress notification toast.
+Open your browser and go to **http://localhost:3000**
+
+That's it. Create your first story and start building your world.
 
 ---
 
-## 🚀 Running the Platform
+## Optional: Enable AI Features
 
-1. **FastAPI Backend**:
-   ```bash
-   PYTHONPATH=backend .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
-   ```
-2. **Vite Frontend**:
-   ```bash
-   cd frontend && npm run dev
-   ```
-   Open [http://localhost:3000/](http://localhost:3000/) in your browser.
+LoreSmith works beautifully without AI. If you want the extra creative power:
+
+1. Install [Ollama](https://ollama.com) on your machine (free, local AI engine).
+2. Pull a model: `ollama pull qwen3.5:9b`
+3. LoreSmith auto-detects it — no configuration needed.
+
+AI features include character analysis, scene rewriting, plot suggestions, chapter illustration, and custom workflows you can build yourself.
+
+---
+
+## Optional: Enable Google Drive Backup
+
+1. Set up a Google Cloud project and download your `client_secret.json` file.
+2. Place it in the project root folder.
+3. Click the Backup button in the app and connect your Google account.
+
+Your entire writing project syncs to your personal Drive — one click, fully encrypted, fully yours.
+
+---
+
+## LoreSmith Is Perfect For
+
+- **Novelists** managing multi-book series with sprawling casts and complex timelines.
+- **Worldbuilders** crafting magic systems, factions, cities, and deep lore.
+- **Screenwriters** organizing scenes, beats, and character arcs.
+- **Tabletop RPG Game Masters** building campaign worlds and tracking NPC relationships.
+- **Creative Writing Students** learning structure through hands-on outlining tools.
+- **Any writer** who wants a beautiful, private, powerful workspace without subscriptions.
+
+---
+
+## Privacy & Ownership
+
+Your writing never leaves your computer unless you choose to back it up. No cloud accounts required. No telemetry. No tracking. LoreSmith is open-source and built on the belief that your stories belong to you.
+
+---
+
+## Tech Stack (for the curious)
+
+- **Frontend:** React 19, Vite 6, Tailwind CSS v4
+- **Backend:** Python, FastAPI, Pydantic v2
+- **Storage:** Local JSON + Markdown files (no database)
+- **AI:** Local Ollama integration (optional)
+- **Backup:** Google Drive OAuth2 (optional)
+
+---
+
+## Contributing
+
+LoreSmith is open source. Contributions, issues, and feature requests are welcome.
+
+```bash
+# Fork the repo, then:
+git checkout -b feature/your-feature
+git commit -m "Add your feature"
+git push origin feature/your-feature
+```
+
+Open a Pull Request and describe what you changed.
+
+---
+
+## License
+
+MIT License — use it, modify it, ship it. Just don't blame us if you write a bestseller.
+
+---
+
+**LoreSmith** — *Where worlds come to life.*

@@ -64,8 +64,8 @@ writer_job/
 │       │   ├── schemas.py    ← AIStatus, ModelInfo, AIConfig, AIJob, AIResult, PipelineSummary,
 │       │                       CustomSkill, RouterRequest, RouterDecision
 │       │   ├── prompts.py    ← SYSTEM_PREFIXES, TASKS, STAGE_LABELS, ROUTER_SYSTEM, step_messages
-│       │   ├── pipelines.py  ← PipelineDef registry: 20 analysis + 3 import pipelines
-│       │   ├── context.py    ← 19 context builders + build_context_from_sources (budget/drop)
+│       │   ├── pipelines.py  ← PipelineDef registry: 21 analysis + 3 import pipelines
+│       │   ├── context.py    ← 20 context builders + build_context_from_sources (budget/drop)
 │       │   ├── store.py      ← AiStore: per-story ai/{config.json,jobs/,results/}
 │       │   ├── custom.py     ← Custom skill CRUD + duplicate + auto-routing
 │       │   ├── router.py     ← Context Router (LLM + keyword fallback)
@@ -82,7 +82,9 @@ writer_job/
 │       │   └── __init__.py
 │       └── __init__.py
 │   └── scripts/
-│       └── import_notion.py  ← One-off Notion Markdown exporter → LoreSmith (designed & implemented; Stages A–D incl. Ollama enrichment; design: plans/implemented/notion-import-pipeline.md)
+│       ├── import_notion.py  ← One-off Notion Markdown exporter → LoreSmith (designed & implemented; Stages A–D incl. Ollama enrichment; design: plans/implemented/notion-import-pipeline.md)
+│       └── juggernaut_xl_generate.py ← Vendored local diffusion generator invoked by the
+│                                        `chapter_art` generate step (see §4.4 env knobs)
 ├── frontend/
 │   ├── package.json          ← React/Vite deps; scripts: dev, build, lint, preview
 │   ├── vite.config.js        ← dev proxy: /api → http://localhost:8000; VitePWA plugin
@@ -93,16 +95,22 @@ writer_job/
 │       ├── App.jsx           ← Provider nesting + MainLayout (navbar/sidebar/content switch)
 │       ├── index.css         ← Tailwind + theme CSS variables (sepia/midnight/typewriter)
 │       ├── hooks/            ← usePwaInstallPrompt.js (beforeinstallprompt → Install button)
+│       ├── utils/            ← recentlyEdited.js (trackRecentEdit/getRecentEdits — localStorage "Recently Edited", max 10/story, sidebar shows last 5)
 │       ├── context/
 │       │   ├── StoryContext.jsx   ← Global story state, activeTab, hotkeys, story CRUD
 │       │   └── ThemeContext.jsx   ← Theme state (sepia/midnight/typewriter)
 │       └── components/
 │           ├── Navbar.jsx              ← Story selector, theme picker, ⌘K, Drive backup, focus, AI panel toggle
-│           ├── Sidebar.jsx             ← NAV_ITEMS (incl. Skill Studio → activeTab 'ai') + active universe badge
+│           ├── Sidebar.jsx             ← NAV_ITEMS (incl. Skill Studio → activeTab 'ai') + active universe badge,
+│           │                              + "Recently Edited" section (last 5 tab-jumps, from localStorage)
 │           ├── QuickSearchModal.jsx    ← ⌘K global search (stories/chars/cities/books/chapters)
 │           ├── AmbientBackground.jsx   ← story background_url cross-fade layer
 │           ├── GoogleDriveModal.jsx    ← backup status + trigger sync
 │           ├── ArtifactFormModal.jsx   ← shared artifact create/edit modal
+│           ├── CharacterPicker.jsx     ← shared dropdown character selector: searchable, image
+│           │                              thumbnails (letter-avatar fallback), scrollable list,
+│           │                              single- or multi-select (removable chips + count footer);
+│           │                              reused for POV/arc/persona/scope pickers + beat multi-select
 │           ├── AIPanel.jsx             ← ⌘⇧A right-drawer: per-tab skill cards, run/cancel, config, image picker,
 │           │                              + per-run "Focus on:" character/chapter scope override (-> input.params)
 │           ├── ExplorerPanel.jsx       ← global bottom-right compass widget + horizontal hover
@@ -113,11 +121,16 @@ writer_job/
 │               ├── HomeView.jsx             ← Home page: all-stories gallery, tags, New Story
 │               ├── DashboardView.jsx        ← Per-story dashboard: overview, fun-facts, theme, memorable quotes (character + standalone)
 │               ├── WorldbuildingView.jsx    ← Tabbed: cities/mechanics/factions/artifacts/glossary/gallery
-│               ├── CharacterRosterView.jsx  ← Roster, gallery, artifacts, appearances, timeline (first portrait auto-added to gallery)
+│               ├── CharacterRosterView.jsx  ← Roster, gallery, artifacts, mechanics (linked powers via `mechanic_ids`), appearances, timeline (first portrait auto-added to gallery), relationships (declared CharacterRelationship editor)
 │               ├── CharacterMapView.jsx     ← Force-directed relationship graph (react-force-graph-2d); clickable edges open a
-│                                              book→chapter interaction panel; strength filter + hide-isolated
+ │                                              book→chapter interaction panel; strength filter + hide-isolated;
+ │                                              shows declared relationship labels on edges
 │               ├── BookOutlinerView.jsx     ← Book/chapter tree, plot beats, arcs, POV tracker,
-│               │                              + "Chapter Judge" sub-tab (chapter_interconnect skill)
+│               │                              per-chapter word-count target + progress bar, cross-chapter
+│               │                              Find & Replace modal, "Chapter Judge" sub-tab
+│               │                              (chapter_interconnect skill); `@` entity references in
+│               │                              scene breakdown / beat descriptions / arc fields /
+│               │                              judge prompt
 │               ├── QuotesView.jsx           ← Standalone quotes (text + note + tags) tab
 │               ├── DraftEditorView.jsx      ← Markdown + Google Docs dual mode, autosave;
 │                                              publishes `loresmith:editor-context` window event
@@ -165,6 +178,9 @@ writer_job/
 All request/response bodies are typed with Pydantic v2 models. The core entities:
 
 - **`Story`** — `id` (slug), `title`, `tags[]`, `background_url`,
+  `banner_url` (user-set dashboard banner image uploaded via the Story Dashboard title card,
+  kept separate from `background_url`/`background_images` so `sync_story_backgrounds` never
+  overwrites it),
   `background_images[]` (list of image URLs — local asset URLs or external URLs,
   used by the Home gallery for add/remove + random-on-refresh), `theme`
   (`"sepia"|"midnight"|"paper"`), `aesthetic_theme`, `background_path`,
@@ -173,10 +189,14 @@ All request/response bodies are typed with Pydantic v2 models. The core entities
   `deleted_at` (optional ISO timestamp set when soft-deleted).
 - **`Character`** — `id`, `name`, `image_url`, `role`, `location` (home/origin location where the
   character is from), `bio`, `persona` (optional narrative voice/style notes used by the Draft
-  Editor's "Rewrite Perspective" feature), `notes[]`, `quotes[]` (memorable lines, shown on the story
+  Editor's "Rewrite Perspective" feature),   `notes[]`, `quotes[]` (memorable lines, shown on the story
   dashboard), `gallery[]`,
-  `artifact_ids[]`, `timeline_events[]` (`TimelineEvent`: `year_or_era`, `title`,
-  `description`, `book_ids[]`), `plot_point_ids[]`.
+  `artifact_ids[]`, `mechanic_ids[]` (world mechanics/powers linked to this character —
+  e.g. a magic system or tech the character uses; a character can be linked to multiple
+  mechanics), `timeline_events[]` (`TimelineEvent`: `year_or_era`, `title`,
+  `description`, `book_ids[]`), `plot_point_ids[]`,
+  `relationships[]` (`CharacterRelationship`: `character_id` + free-text `label` like
+  sibling/rival/mentor — explicitly declared connections shown/merged in the Character Map).
 - **`WorldMechanics`** — `magic_system`, `technology_level`, `global_rules[]`.
 - **`City`** — `id`, `name`, `region`, `atmosphere`, `image_url`, `key_locations[]`.
 - **`Faction`** — `id`, `name`, `description`, `leader`, `alignment`.
@@ -195,8 +215,12 @@ All request/response bodies are typed with Pydantic v2 models. The core entities
   `image_url`, `overview` (short blurb for the tooltip).
 - **`Book`** — `id`, `title`, `order`, `target_word_count`, `plot_subsections[]`
   (`PlotSubsection`: `title`, `description`), `google_doc_url`.
-- **`Chapter`** — `id`, `title`, `pov_character_id`, `scene_breakdown`,
-  `markdown_file_path`, `word_count`, `google_doc_id`.
+- **`Chapter`** — `id`, `title`, `order` (int, 1-based reading order — set by the
+  drag-and-drop reorder feature; defaulted to `max(existing)+1` on save when omitted),
+  `pov_character_id`, `scene_breakdown`, `markdown_file_path`,
+  `word_count`, `target_word_count` (optional per-chapter pacing target; shown as a progress
+  bar on the Book Outliner chapter card), `google_doc_id`, `image_url` (optional generated
+  chapter illustration, set by the `chapter_art` AI skill).
 - **`Plot`** — `beats[]` (`PlotBeat`: `id`, `title`, `description`, `chapter_id`,
   `character_ids[]`), `theme`.
 - **`CharacterArc`** — `character_id`, `arc_summary`, `starting_state`, `ending_state`,
@@ -205,10 +229,12 @@ All request/response bodies are typed with Pydantic v2 models. The core entities
   (`AppearanceChapter` has `is_pov`), `plot_points[]`.
 - **Character Map output (`CharacterMap`)** — `nodes[]` (`CharacterMapNode`: `id`,
   `name`, `image_url`, `role`, `degree`) + `edges[]` (`CharacterMapEdge`: `id`
-  `source--target`, `weight`, `interactions[]`). Each `CharacterMapInteraction` is one
+  `source--target`, `weight`, `interactions[]`, `relationship_label` — optional, set from
+  a declared `CharacterRelationship`). Each `CharacterMapInteraction` is one
   shared plot beat (`book_id`/`book_title`, beat `title`/`description`, optional
   `chapter` as `CharacterMapChapter`). **Derived live** from plot-beat co-occurrence —
-  nothing is stored.
+  nothing is stored. Edges for explicitly declared character relationships are merged in
+  with `weight` ≥ 1 and carry the `relationship_label`.
 - **Writing stats output (`WritingStats`)** — `total_words`, `total_chapters`,
   `current_streak`, `longest_streak`, `today_words`, `today_chapters`,
   `writing_days_total`, `last_active` (ISO or None), `recent_activity[]` (`WritingStatsDay`:
@@ -228,7 +254,7 @@ Every story lives at `data/stories/<story-slug>/`:
 │   └── <char-id>.json              # One Character per file
 ├── world/
 │   ├── cities.json                 # [] of City
-│   ├── mechanics.json              # WorldMechanics object (NOT a list!)
+│   ├── mechanics.json              # [] of WorldMechanics (a world can have several)
 │   ├── factions.json               # [] of Faction
 │   ├── artifacts.json              # [] of Artifact
 │   ├── glossary.json               # [] of GlossaryTerm
@@ -245,7 +271,11 @@ Every story lives at `data/stories/<story-slug>/`:
 ```
 
 **Gotchas to preserve:**
-- `mechanics.json` is a **single object**, while all other world files are **arrays**.
+- `mechanics.json` is an **array** of `WorldMechanics` (a world can have several mechanics
+  systems). Each entry has `id`, `name`, `magic_system`, `technology_level`, `global_rules`.
+  `get_world_mechanics` auto-migrates a legacy single-object file into a 1-element list and
+  backfills `id`/`name` from `magic_system`/`technology_level` when missing. `get_world_section`
+  now always defaults to `[]` (no object special-case).
 - A chapter is stored as **two files** (`.json` metadata + `.md` content) with the same
   `ch-<id>` base name. Deleting/editing a chapter must touch both.
 - `word_count` on a chapter is **derived** from the `.md` file whenever the chapter is
@@ -275,7 +305,8 @@ logic lives here, organized by feature (stories, assets, characters, world, book
 arcs, chapters/prose). Key behaviors to maintain:
 
 - `ensure_story_structure(slug)` creates the per-story dirs + default world files
-  (including the `gallery.json` default `[]`, and the `mechanics.json` default object).
+  (including the `gallery.json` default `[]`, and the `mechanics.json` default array
+  with one `WorldMechanics` entry).
 - `sync_story_backgrounds(story_id)` recomputes background_images from the story's
   concept art (world/gallery.json) and each character's `gallery[]` only (character
   portraits `image_url` are excluded and removed if previously synced). Deduped, keeps
@@ -300,13 +331,24 @@ arcs, chapters/prose). Key behaviors to maintain:
   files; `hard=True` performs the old `shutil.rmtree`. `restore_story(slug)` clears the
   flag so the story reappears in the library. `list_dirs()` returns sorted story dir names.
 - `save_chapter` sets `markdown_file_path` to
-  `books/book-<book_id>/chapters/ch-<id>.md` and re-derives `word_count`.
+  `books/book-<book_id>/chapters/ch-<id>.md` and re-derives `word_count`. When the payload
+  does not supply `order`, it assigns `max(existing order) + 1`.
+- `list_chapters(..., reverse=False)` returns chapters sorted by `order` (with
+  numeric-id tiebreak) — the order users set via drag-and-drop in the Book Outliner tree
+  view. Passing `reverse=True` returns the descending order (driven by `?sort=desc`).
 - `get_character_appearances` does a **live filesystem scan** across books, plot beats,
   character arcs, and chapters to compute a character's books/chapters/plot-points.
 - `get_character_map(slug)` derives a **CharacterMap** live: every plot beat listing 2+
   characters contributes one interaction between each pair (carrying the book and the
   beat's chapter when `beat.chapter_id` resolves). Edge `weight` = number of shared beats;
-  `degree` per node = number of distinct bonds. Single source for the Character Map view.
+  `degree` per node = number of distinct bonds. Declared `CharacterRelationship`s are
+  merged in as edges (weight ≥ 1, carrying the `relationship_label`). Single source for
+  the Character Map view.
+- `find_replace_across_chapters(slug, payload)` — cross-chapter **Find & Replace** across
+  every chapter `.md` file in the story. Supports case sensitivity and whole-word matching,
+  returns matched contexts (chapter id, book id, surrounding text) so the frontend can
+  preview, and performs the replace atomically (rewriting each matched chapter's `.md` via
+  `write_text_safe` and re-deriving its word count).
 - `get_writing_stats(slug)` derives **WritingStats** live from the filesystem modification
   times of every chapter's `.md` file (no persistent model): groups each chapter's current
   `word_count` by the calendar day it was last edited, computes current/longest streaks
@@ -348,10 +390,24 @@ REST endpoints in `main.py`. The frontend calls these via the Vite dev proxy. Su
   `GET/PUT/DELETE .../books/{book_id}`,
   `GET/PUT/POST .../books/{book_id}/plot`,
   `GET/PUT/POST .../books/{book_id}/arcs`
-- **Chapters:** `GET/POST .../books/{book_id}/chapters`,
+- **Chapters:** `GET/POST .../books/{book_id}/chapters` (`GET` accepts optional
+  `?sort=asc|desc`, default `asc`, controlling chapter display order),
   `GET/PUT/DELETE .../chapters/{ch_id}`,
+  `POST .../books/{book_id}/chapters/reorder` (body `{chapter_ids: []}` — writes 1-based
+  `order` back to each chapter for the drag-and-drop reorder feature),
   `GET .../chapters/{ch_id}/content` (alias `/prose`),
-  `PUT/POST .../chapters/{ch_id}/content` (alias `/prose`)
+  `PUT/POST .../chapters/{ch_id}/content` (alias `/prose`),
+  `POST .../books/{book_id}/chapters/from-ai` (body
+  `SaveAIDraftPayload {title, content, scene_breakdown, pov_character_id}` — creates a new
+  chapter with the given prose, used by the AI "Draft Chapter from Breakdown" result's
+  "Save as chapter" action),
+  `GET .../chapters/{ch_id}/art-suggestions` (returns `{chapter_id, character_id,
+  location, images[]}` — auto-detects the POV character's portrait + region city image for the
+  one-click "Generate Cover Art" inline buttons; `character_id`/`location`/`images` may be
+  null/empty when no POV or no matching images exist)
+- **Find & Replace:** `POST /api/stories/{id}/find-replace` (body
+  `{find, replace, case_sensitive, whole_word, dry_run}`) → `{ count, replacements[] }`
+  (each with `book_id`, `chapter_id`, `context`). Runs on every chapter `.md` in the story.
 - **Google Drive / Backup:**
   - `GET /api/auth/google` — OAuth flow init
   - `GET /api/backup/status` — returns in-memory `_backup_status` dict (initialized from
@@ -427,6 +483,17 @@ are never deleted.
   on slow models), `OLLAMA_CONTEXT_BUDGET_CHARS` (`40000`), `OLLAMA_TEMPERATURE` (`0.2`),
   `OLLAMA_MAX_IMAGES_PER_RUN` (`6`), `OLLAMA_CAPABILITY_OVERRIDES` (empty; format
   `family:caps;[...]` e.g. `gemma4:text,vison` — escape hatch for exotic models).
+- Local diffusion generation (the `chapter_art` skill): `GENERATE_SCRIPT` (path to
+  `juggernaut_xl_generate.py` — **defaults to the vendored copy under `backend/scripts/`**, so
+  generation is enabled out of the box when torch+diffusers are present; override to switch from
+  the vendored script), `GENERATE_PYTHON` (python used to run it — if unset, auto-resolves to a
+  `python3` on PATH that can import torch+diffusers, else the Apple-Silicon framework python,
+  else `python3`; override if torch lives elsewhere), `GENERATE_STEPS` (`25`), `GENERATE_SEED`
+  (unset → random), `GENERATE_GUIDANCE` (`5.0`), `GENERATE_WIDTH`/`GENERATE_HEIGHT` (`1024`/`1024`).
+- The generator script `backend/scripts/juggernaut_xl_generate.py` is **vendored** (owned by the
+  repo), not an external download: it shells out to a subprocess that renders with
+  `StableDiffusionXLPipeline.from_single_file("RunDiffusion/Juggernaut-XL-v9")` on MPS/CUDA.
+  An env override lets you point elsewhere, but the vendored default is what runs.
 
 ### 4.5 Ollama AI package (`backend/app/ai/`)
 - Lives as a sub-package; module-level `ollama_client = OllamaClient()` singleton in
@@ -441,22 +508,43 @@ are never deleted.
 - `schemas.py`: `AIStatus`, `ModelInfo`, `AIConfig`, `RunInput`/`RunRequest`,
   `AIJob`, `AIResult`, `PipelineSummary`, `CustomSkillPayload`, `RoutingBlock`,
   `CustomSkill`, `RouterRequest`, `RouterDecision`.
-- `prompts.py`: `SYSTEM_PREFIXES`, `TASKS` for all 21 pipelines, `STAGE_LABELS`,
+- `prompts.py`: `SYSTEM_PREFIXES`, `TASKS` for all 22 pipelines, `STAGE_LABELS`,
   `ROUTER_SYSTEM`, `step_messages` helper.
-- `pipelines.py`: `PipelineDef` registry — 20 analysis + 3 import pipelines (incl. `perspective_rewrite`, and
+- `pipelines.py`: `PipelineDef` registry — 22 analysis + 3 import pipelines (incl. `perspective_rewrite`, `chapter_draft`
+  — "Draft Chapter from Breakdown", which writes an entire chapter from the scene breakdown + characters' personas +
+  referenced world context — and
   `chapter_interconnect` which carries **no tabs** so it is driven only from the Book Outliner's
-  "Chapter Judge" sub-tab, not the AI Studio panel). Built-in `StepSpec`s
+  "Chapter Judge" sub-tab, not the AI Studio panel — and `chapter_art`, a **multi-step**
+  illustration pipeline: a vision LLM writes a detailed image prompt from the chapter outline +
+  POV character + location + prose, then a local Juggernaut XL script renders it, saves it to the
+  story's assets, and attaches it as the chapter's `image_url`). Built-in `StepSpec`s
   may set `model_preferred` to pin a specific installed model for that step (used by
   `perspective_rewrite` → `qwen2.5:7b`, because the default reasoning model qwen3.5:9b is
-  far too slow for interactive rewrites and times out). `jobs._resolve_step_model` honors
-  `step.model_preferred` ahead of the family/config default.
-- `context.py`: 19 context builders + `SOURCE_BUILDERS` + `build_context_from_sources`
+  far too slow for interactive rewrites and times out; `chapter_draft` → `qwen2.5:7b` for
+  the same reason). `StepSpec` also carries `kind` (`"llm"` default | `"generate"`) — a
+  `"generate"` step is executed by `generator.py` (local diffusion) instead of an Ollama
+  call. `jobs._resolve_step_model` honors
+  `step.model_preferred` ahead of the family/config default. `to_summary` adds a
+  `required_models` list to each `PipelineSummary` (`_required_models`, deduped per-step:
+  explicit `model_preferred`, else `Text/Vision/OCR LLM`, else `Local diffusion (Juggernaut
+  XL)` for `kind=="generate"`) — shown as chips on each AI Panel skill card.
+- `generator.py`: async wrapper around the local `juggernaut_xl_generate.py` script
+  (`GENERATE_SCRIPT`). `generate_image()` runs the script via subprocess and returns the
+  output PNG path; `is_generation_enabled()` reports whether generation is configured.
+  The `chapter_art` generate step calls this, saves the asset via `FileManager.save_asset`,
+  and attaches it via `FileManager.set_chapter_image_url`.
+- `context.py`: 21 context builders + `SOURCE_BUILDERS` + `build_context_from_sources`
   with budget/drop logic and "sampled N" notes. All builders share the uniform
   signature `(fm, story, params=None)` — custom-skill runs assemble context here from
   `routing.sources` (built-in pipelines use `build_context`). The `chapter_interconnect`
   builder (`_chapter_range_context`) sorts chapters by numeric id and slices the
   `chapter_id`→`chapter_end` range (defaults to a single chapter when `chapter_end` is
   omitted), returning ordered prose slices + in-range plot beats + appearing characters.
+  The `chapter_art` builder (`_chapter_art_context`) gathers the chapter outline + prose,
+  the POV character profile, the city/region the scene is set in, and the book's plot
+  outline for the target chapter — the beats whose `chapter_id` matches the chapter (via
+  `_chapter_plot_context`) plus the plot `theme` — so the illustration is grounded in the
+  outline's dramatic intent.
 - `store.py`: `AiStore` — per-story `ai/{config.json,jobs/,results/}` persistence.
 - `custom.py`: async custom skill CRUD + duplicate + auto-routing (`route_skill`).
   `create`/`update` skip the router when `routing_mode=="locked"` + explicit
@@ -467,7 +555,9 @@ are never deleted.
   `routed_by` badge.
 - `jobs.py`: `JobManager` — per-story FIFO queue, one runner per story, cancel,
   `recover_interrupted` startup hook, per-step model resolution via story config
-  overrides, image staging.
+  overrides, image staging, and `kind="generate"` step execution (local diffusion via
+  `generator.py`, saving the asset + attaching it to the chapter). Vision/OCR LLM steps
+  attach a job's staged images to the last message.
 - `qwen3.5:9b` is a **reasoning model**: `content` is empty while thinking is in
   progress, and `message.thinking` holds the chain. Keep `num_predict` generous (or
   unset) and rely on `options.think=false` only when you want reasoning off.
@@ -622,6 +712,9 @@ to reuse:
 - **Characters are saved via `POST /api/stories/{id}/characters`** (upsert) — the frontend
   uses POST both to create and update (not PUT) in `CharacterRosterView`/`WorldbuildingView`.
 - **Plot & arcs are saved via `POST .../plot` and `POST .../arcs`** (upsert, full array).
+- **Find & Replace:** `POST /api/stories/{story}/find-replace` with
+  `{ find, replace, case_sensitive, whole_word, dry_run }` → `{ count, replacements[] }`
+  (Book Outliner modal: Preview → Replace All).
 - **Appearances matrix** loads via
   `GET .../characters/{char_id}/appearances` → `{ books, chapters, plot_points }`.
 - **Entity references:** fetch `GET /api/stories/{id}/references` → `List[EntityRefItem]`
@@ -689,8 +782,8 @@ Follow these to keep code consistent and safe.
    slugs (`name.toLowerCase().replace(/[^a-z0-9]+/g, '-')`). Books are `"1","2",...`
    and dirs are `book-<id>`. Chapters use `ch-<id>` file prefix.
 6. When adding a new world section/file, remember to add a default to
-   `ensure_story_structure` **and** decide whether it's an array or object (only
-   `mechanics` is an object).
+   `ensure_story_structure` **and** decide whether it's an array or object (all world
+   files except `mechanics` are arrays; `mechanics` is now also an array).
 
 ### Frontend
 1. **UI reads theme from CSS variables** (`var(--accent)`, etc.) — no hardcoded colors.

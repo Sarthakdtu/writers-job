@@ -9,6 +9,11 @@ class TimelineEvent(BaseModel):
     book_ids: List[str] = Field(default_factory=list)
 
 
+class CharacterRelationship(BaseModel):
+    character_id: str
+    label: str = ""
+
+
 class Character(BaseModel):
     id: str
     name: str
@@ -21,13 +26,17 @@ class Character(BaseModel):
     quotes: List[str] = Field(default_factory=list)
     gallery: List[str] = Field(default_factory=list)
     artifact_ids: List[str] = Field(default_factory=list)
+    mechanic_ids: List[str] = Field(default_factory=list)
     timeline_events: List[TimelineEvent] = Field(default_factory=list)
     plot_point_ids: List[str] = Field(default_factory=list)
+    relationships: List[CharacterRelationship] = Field(default_factory=list)
 
 
 class WorldMechanics(BaseModel):
-    magic_system: str
-    technology_level: str
+    id: str = ""
+    name: str = ""
+    magic_system: str = ""
+    technology_level: str = ""
     global_rules: List[str] = Field(default_factory=list)
 
 
@@ -130,7 +139,9 @@ class Chapter(BaseModel):
     scene_breakdown: Optional[str] = ""
     markdown_file_path: Optional[str] = ""
     word_count: Optional[int] = 0
+    target_word_count: Optional[int] = 0
     google_doc_id: Optional[str] = None
+    image_url: Optional[str] = None
 
 
 class PlotBeat(BaseModel):
@@ -210,6 +221,7 @@ class CharacterMapEdge(BaseModel):
     target: str
     weight: int = 1
     interactions: List[CharacterMapInteraction] = Field(default_factory=list)
+    relationship_label: Optional[str] = ""
 
 
 class CharacterMap(BaseModel):
@@ -451,6 +463,7 @@ class Story(BaseModel):
     title: str
     tags: List[str] = Field(default_factory=list)
     background_url: Optional[str] = ""
+    banner_url: Optional[str] = ""
     background_images: List[str] = Field(default_factory=list)
     theme: Literal[
         "sepia", "midnight", "typewriter", "forest", "obsidian",

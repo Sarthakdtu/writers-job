@@ -1,5 +1,6 @@
 """AI settings, all overridable via environment variables."""
 import os
+from pathlib import Path
 from typing import Optional
 
 
@@ -65,6 +66,83 @@ def get_max_images_per_run() -> int:
         return int(os.getenv("OLLAMA_MAX_IMAGES_PER_RUN", "6"))
     except ValueError:
         return 6
+
+
+def get_generate_script() -> Optional[str]:
+    """Path to the local diffusion image-generation script (juggernaut_xl_generate.py,
+    vendored under backend/scripts/). Empty/None disables the chapter-art generation stage."""
+    raw = os.getenv("GENERATE_SCRIPT", "").strip()
+    if raw:
+        return raw
+    vendored = Path(__file__).resolve().parents[2] / "scripts" / "juggernaut_xl_generate.py"
+    return str(vendored) if vendored.exists() else None
+
+
+def get_generate_steps() -> int:
+    try:
+        return int(os.getenv("GENERATE_STEPS", "25"))
+    except ValueError:
+        return 25
+
+
+def get_generate_seed() -> Optional[int]:
+    raw = os.getenv("GENERATE_SEED", "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def get_generate_guidance() -> float:
+    try:
+        return float(os.getenv("GENERATE_GUIDANCE", "5.0"))
+    except ValueError:
+        return 5.0
+
+
+def get_generate_width() -> int:
+    try:
+        return int(os.getenv("GENERATE_WIDTH", "1024"))
+    except ValueError:
+        return 1024
+
+
+def get_generate_height() -> int:
+    try:
+        return int(os.getenv("GENERATE_HEIGHT", "1024"))
+    except ValueError:
+        return 1024
+
+
+def get_generate_python() -> str:
+    """Python interpreter used to run the generation script. It must have torch +
+    diffusers installed. Prefers `GENERATE_PYTHON`, then a PATH `python3` that can import
+    both, then common Apple-Silicon framework pythons, then plain `python3`."""
+    from_env = os.getenv("GENERATE_PYTHON", "").strip()
+    if from_env:
+        return from_env
+
+    import shutil
+    import subprocess
+
+    def has_deps(py: str) -> bool:
+        try:
+            code = py if os.path.isabs(py) else str(shutil.which(py) or py)
+            r = subprocess.run(
+                [code, "-c", "import torch, diffusers"],
+                capture_output=True,
+                timeout=10,
+            )
+            return r.returncode == 0
+        except Exception:
+            return False
+
+    for cand in (shutil.which("python3"), "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3"):
+        if cand and has_deps(cand):
+            return cand
+    return "python3"
 
 
 def get_capability_override(name: str) -> Optional[str]:

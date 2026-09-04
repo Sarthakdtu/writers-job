@@ -7,6 +7,7 @@ see the shape without token blowout. Nothing reads or writes files here — cont
 from `FileManager` (the single source of truth).
 """
 import json
+import re
 from typing import Any, Dict, List, Optional
 
 from app.ai import config as ai_config
@@ -122,12 +123,16 @@ def _build_glossary(fm, story) -> Dict[str, Any]:
 
 
 def build_mechanics(fm, story, params=None) -> Dict[str, Any]:
-    m = fm.get_world_mechanics(story.id)
-    return {"mechanics": {
-        "magic_system": m.magic_system,
-        "technology_level": m.technology_level,
-        "global_rules": list(m.global_rules or []),
-    }}
+    mech_list = fm.get_world_mechanics(story.id)
+    return {"mechanics": [
+        {
+            "name": m.name,
+            "magic_system": m.magic_system,
+            "technology_level": m.technology_level,
+            "global_rules": list(m.global_rules or []),
+        }
+        for m in mech_list
+    ]}
 
 
 def build_books(fm, story, params=None) -> Dict[str, Any]:
@@ -497,6 +502,8 @@ def build_context(
         "show_tell": lambda: _chapter_context(fm, story, params),
         "perspective_rewrite": lambda: _perspective_context(fm, story, params),
         "chapter_interconnect": lambda: _chapter_range_context(fm, story, params),
+        "chapter_draft": lambda: _chapter_draft_context(fm, story, params),
+        "chapter_art": lambda: _chapter_art_context(fm, story, params),
     }
     fn = builders.get(pipeline_id)
     if fn is None:
@@ -578,6 +585,134 @@ def _continue_context(fm, story, params) -> Dict[str, Any]:
         "pov": ch["chapter"].pov_character_id,
         "style_cues": cap_text(ch["chapter"].scene_breakdown or "", 1500),
     }
+
+
+def _chapter_draft_context(fm, story, params) -> Dict[str, Any]:
+    """Context for the draft-a-chapter skill: the target chapter's scene breakdown, the
+    POV character's persona, and the reference entities mentioned in the breakdown so the
+    draft stays consistent with the world."""
+    ch = _find_chapter(fm, story.id, (params or {}).get("book_id"), (params or {}).get("chapter_id"))
+    if not ch:
+        return {"error": "Missing selection: choose a chapter to draft from its scene breakdown."}
+
+    chapter = ch["chapter"]
+    breakdown = (chapter.scene_breakdown or "").strip()
+    if not breakdown:
+        breakdown = f"(No scene breakdown provided for {chapter.title or chapter.id} — write a coherent chapter advancing the attached plot beats.)"
+
+    pov_id = chapter.pov_character_id
+    chars = {c.id: c for c in fm.list_characters(story.id)}
+    pov = chars.get(pov_id)
+    pov_block = None
+    if pov:
+        pov_block = {
+            "id": pov.id, "name": pov.name, "role": pov.role, "location": pov.location,
+            "bio": cap_text(pov.bio or "", 1500),
+            "persona": cap_text(pov.persona or "", 2000),
+            "notes": [cap_text(n, 400) for n in (pov.notes or [])][:12],
+        }
+
+    mentioned_ids = set()
+    for token in re.findall(r"\[\[([^\]|]+):", breakdown):
+        parts = token.split("|")
+        if parts and parts[0]:
+            mentioned_ids.add(parts[0])
+
+    mentioned = [
+        {
+            "id": c.id, "name": c.name, "role": c.role, "location": c.location,
+            "bio": cap_text(c.bio or "", 800),
+            "persona": cap_text(c.persona or "", 1000),
+            "notes": [cap_text(n, 300) for n in (c.notes or [])][:8],
+        }
+        for c in chars.values() if c.id in mentioned_ids
+    ]
+
+    beats = [
+        {"id": b.id, "title": b.title, "description": cap_text(b.description, 300),
+         "chapter_id": b.chapter_id, "character_ids": list(b.character_ids or [])}
+        for b in fm.get_plot(story.id, ch["book"].id).beats
+    ]
+
+    return {
+        "book": {"id": ch["book"].id, "title": ch["book"].title},
+        "chapter": {
+            "id": chapter.id, "title": chapter.title,
+            "pov": pov_id,
+            "scene_breakdown": cap_text(breakdown, 6000),
+            "word_count": chapter.word_count,
+        },
+        "pov_character": pov_block,
+        "mentioned_characters": mentioned,
+        "plot_beats": beats[:30],
+        "world": {
+            "mechanics": build_mechanics(fm, story),
+            "cities": _build_cities(fm, story).get("cities", [])[:15],
+            "factions": _build_factions(fm, story).get("factions", [])[:15],
+            "artifacts": _build_artifacts(fm, story).get("artifacts", [])[:15],
+            "glossary": _build_glossary(fm, story).get("glossary", [])[:40],
+        },
+    }
+
+
+def _chapter_art_context(fm, story, params) -> Dict[str, Any]:
+    """Context for the chapter-art skill: the target chapter's outline, prose, the POV
+    character (name, role, visual description, referenced image), and the city/region the
+    scene happens in (atmosphere + referenced images), so the prompt writer grounds the
+    illustration in the actual scene."""
+    ch = _find_chapter(fm, story.id, (params or {}).get("book_id"), (params or {}).get("chapter_id"))
+    if not ch:
+        return {"error": "Missing selection: choose a chapter to illustrate."}
+
+    chapter = ch["chapter"]
+    characters = {c.id: c for c in fm.list_characters(story.id)}
+    pov_char = characters.get(chapter.pov_character_id)
+
+    cities = {c.name: c for c in fm.get_cities(story.id)}
+    city = None
+    if pov_char and pov_char.location:
+        city = cities.get(pov_char.location)
+
+    outc = {
+        "book": ch["book"].title,
+        "chapter": {
+            "id": chapter.id, "title": chapter.title,
+            "scene_breakdown": cap_text(chapter.scene_breakdown or "", 4000),
+        },
+        "plot": _chapter_plot_context(fm, story.id, ch["book"].id, chapter.id),
+        "pov_character": {
+            "id": pov_char.id, "name": pov_char.name, "role": pov_char.role,
+            "location": pov_char.location, "bio": cap_text(pov_char.bio or "", 2000),
+            "persona": cap_text(pov_char.persona or "", 2000),
+            "notes": [cap_text(n, 400) for n in (pov_char.notes or [])][:8],
+        } if pov_char else None,
+        "location": {
+            "name": city.name, "region": city.region or "",
+            "atmosphere": cap_text(city.atmosphere or "", 1500),
+            "key_locations": list(city.key_locations or []),
+        } if city else None,
+        "prose": cap_text(ch["prose"], 6000),
+    }
+    return outc
+
+
+def _chapter_plot_context(fm, story_id, book_id, chapter_id) -> Optional[Dict[str, Any]]:
+    """The book's plot outline for the illustrated chapter: the beats whose `chapter_id`
+    falls on the target chapter (the scene's dramatic intent/outline), plus the plot theme.
+    Returns None when the book has no outline beats/theme."""
+    plot = fm.get_plot(story_id, book_id)
+    beats = [
+        {
+            "title": beat.title,
+            "description": cap_text(beat.description or "", 300),
+            "characters": list(beat.character_ids or []),
+        }
+        for beat in plot.beats
+        if beat.chapter_id == chapter_id
+    ]
+    if not beats and not plot.theme:
+        return None
+    return {"theme": plot.theme or "", "beats": beats}
 
 
 def _chapter_range_context(fm, story, params) -> Dict[str, Any]:

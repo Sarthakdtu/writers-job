@@ -364,7 +364,9 @@ export const CharacterMapView = () => {
   const linkLabelFn = (link) => {
     const a = nodesById[graphId(link.source)];
     const b = nodesById[graphId(link.target)];
-    return `${a?.name || link.source} ↔ ${b?.name || link.target} — ${link.weight || 1} shared beat${link.weight === 1 ? '' : 's'}`;
+    const relLabel = link.relationship_label ? ` · ${link.relationship_label}` : '';
+    const beatLabel = link.weight > 0 ? `${link.weight} shared beat${link.weight === 1 ? '' : 's'}` : 'declared relationship';
+    return `${a?.name || link.source} ↔ ${b?.name || link.target}${relLabel} — ${beatLabel}`;
   };
 
   if (!activeStory) {
@@ -673,7 +675,12 @@ export const CharacterMapView = () => {
                   {nodesById[graphId(selectedEdge.target)]?.name || graphId(selectedEdge.target)}
                 </span>
               </div>
-              <div className="mt-2 flex items-center gap-2">
+              <div className="mt-2 flex items-center gap-2 flex-wrap">
+                {selectedEdge.relationship_label ? (
+                  <span className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent)] px-2 py-1 text-[10px] font-bold text-white border border-[var(--accent)]">
+                    {selectedEdge.relationship_label}
+                  </span>
+                ) : null}
                 <span className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent-light)] px-2 py-1 text-[10px] font-bold text-[var(--accent)] border border-[var(--border-subtle)]">
                   <BookOpen className="h-3 w-3" />
                   {selectedEdge.weight} shared beat{selectedEdge.weight === 1 ? '' : 's'}

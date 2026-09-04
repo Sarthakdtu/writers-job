@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Home,
   LayoutDashboard,
@@ -14,10 +14,33 @@ import {
   Bot,
   Wand2,
   Trash2,
-  Lock
+  Lock,
+  Clock,
+  FileEdit,
 } from 'lucide-react';
 import { useStory } from '../context/StoryContext';
 import { useSkillLevel, featureIndex } from '../context/SkillLevelContext';
+import { getRecentEdits } from '../utils/recentlyEdited';
+
+const TAB_ICONS = {
+  characters: Users,
+  editor: FileText,
+  outliner: GitFork,
+  world: Globe,
+  dashboard: LayoutDashboard,
+  charmap: Network,
+  quotes: Quote,
+};
+
+const TAB_LABELS = {
+  characters: 'Characters',
+  editor: 'Chapters',
+  outliner: 'Outliner',
+  world: 'World',
+  dashboard: 'Dashboard',
+  charmap: 'Map',
+  quotes: 'Quotes',
+};
 
 // Each nav item maps to the skill-level feature key that unlocks it.
 export const NAV_ITEMS = [
@@ -37,9 +60,22 @@ export const NAV_ITEMS = [
 export const Sidebar = () => {
   const { activeTab, setActiveTab, sidebarOpen, setSidebarOpen, activeStory } = useStory();
   const { rank } = useSkillLevel();
+  const [recentItems, setRecentItems] = useState([]);
 
   // Beginner gets a focused set; higher tiers progressively unlock the rest.
   const visibleItems = NAV_ITEMS.filter((item) => featureIndex(item.feature) <= rank);
+
+  useEffect(() => {
+    if (activeStory?.id) {
+      setRecentItems(getRecentEdits(activeStory.id).slice(0, 5));
+    } else {
+      setRecentItems([]);
+    }
+  }, [activeStory?.id, activeTab]);
+
+  const handleRecentClick = (item) => {
+    if (item.tab) setActiveTab(item.tab);
+  };
 
   return (
     <aside
@@ -107,6 +143,31 @@ export const Sidebar = () => {
             </button>
           );
         })}
+
+        {/* Recently Edited */}
+        {sidebarOpen && recentItems.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-[var(--border-subtle)]">
+            <div className="flex items-center gap-1.5 px-3 mb-1.5">
+              <Clock className="h-3 w-3 text-[var(--text-dim)]" />
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-dim)]">Recently Edited</span>
+            </div>
+            {recentItems.map((item) => {
+              const Icon = TAB_ICONS[item.tab] || FileEdit;
+              return (
+                <button
+                  key={`${item.type}-${item.id}`}
+                  onClick={() => handleRecentClick(item)}
+                  className="w-full flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-left text-[11px] font-medium text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)] transition-all group"
+                  title={item.label}
+                >
+                  <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+                  <span className="truncate">{item.label}</span>
+                  <span className="ml-auto text-[9px] text-[var(--text-dim)] shrink-0">{TAB_LABELS[item.tab] || item.tab}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </nav>
 
       {/* Locked-feature teaser (nudges to level up) */}

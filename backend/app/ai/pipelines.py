@@ -21,6 +21,7 @@ class StepSpec:
     pass_prev_output: bool = False
     post_process: Optional[str] = None
     format: Optional[Any] = None
+    kind: str = "llm"            # "llm" (Ollama chat) or "generate" (local diffusion image) or "attach" (post-processing)
 
 
 @dataclass
@@ -245,6 +246,23 @@ _register(PipelineDef(
     steps=[_text_step("perspective_rewrite", model_preferred="qwen2.5:7b")],
 ))
 
+# Draft an entire chapter from its scene breakdown, the POV character's persona, and all
+# reference entities mentioned in the breakdown.
+_register(PipelineDef(
+    id="chapter_draft",
+    name="Draft Chapter from Breakdown",
+    description="Writes a full chapter from the scene breakdown, the POV character's persona, and every character and world reference in it.",
+    tabs=["editor", "outliner"],
+    input_kind="selection",
+    needs_selection=True,
+    selection_param=_editor_selection(),
+    context_builder="chapter_draft",
+    temperature=0.8,
+    system_prompt_key="creative",
+    save_targets=["prose.insert", "chapter.notes"],
+    steps=[_text_step("chapter_draft", model_preferred="qwen2.5:7b")],
+))
+
 # Chapter interconnectedness judge: an LLM evaluates how well the plot progresses and
 # how interconnected the chapters in a x→y range are, using a user-supplied prompt.
 # Driven from the Book Outliner's dedicated "Judge" tab (who also supplies the range),
@@ -260,6 +278,41 @@ _register(PipelineDef(
     context_builder="chapter_interconnect",
     system_prompt_key="analysis",
     steps=[_text_step("chapter_interconnect")],
+))
+
+# Chapter illustration ("Chapter Art"): a multi-step pipeline that
+#   1. A vision LLM writes a detailed image prompt grounded in the chapter outline,
+#      the POV character (appearance + optional reference image), the region image, and
+#      the prose.
+#   2. The local Juggernaut XL script renders the image (GENERATE_SCRIPT), which is saved
+#      to the story's assets and attached to the chapter as its `image_url`.
+_register(PipelineDef(
+    id="chapter_art",
+    name="Chapter Art",
+    description="Generates a chapter illustration from the outline, POV character, region image, and prose, then attaches it to the chapter.",
+    tabs=["outliner", "editor"],
+    input_kind="selection",
+    needs_selection=True,
+    selection_param=_editor_selection(),
+    needs_images=True,
+    max_images=2,
+    context_builder="chapter_art",
+    temperature=0.4,
+    system_prompt_key="creative",
+    save_targets=["chapter.image"],
+    steps=[
+        StepSpec(
+            prompt_key="chapter_art_prompt",
+            model_family="vision",
+            model_preferred="minicpm-v:latest",
+            temperature=0.4,
+        ),
+        StepSpec(
+            prompt_key="chapter_art_generate",
+            model_family="text",
+            kind="generate",
+        ),
+    ],
 ))
 
 # --- Import & Extract pipelines -------------------------------------------
@@ -333,6 +386,31 @@ def filter_for_tab(tab: Optional[str]) -> List[PipelineDef]:
     return [p for p in PIPELINES.values() if p.family == "import" or tab in p.tabs]
 
 
+def _step_model_label(step: StepSpec) -> str:
+    """Human-readable model requirement for one pipeline step."""
+    if step.kind == "generate":
+        return "Local diffusion (Juggernaut XL)"
+    if step.model_preferred:
+        return step.model_preferred
+    return {
+        "text": "Text LLM",
+        "vision": "Vision LLM",
+        "ocr": "OCR LLM",
+    }.get(step.model_family, step.model_family)
+
+
+def _required_models(p: PipelineDef) -> List[str]:
+    """Deduped, ordered list of model requirements for a pipeline's steps."""
+    if not p.steps:
+        return [_step_model_label(StepSpec(prompt_key="", model_family=p.model_family))]
+    seen: List[str] = []
+    for step in p.steps:
+        label = _step_model_label(step)
+        if label not in seen:
+            seen.append(label)
+    return seen
+
+
 def to_summary(p: PipelineDef, enabled: bool) -> PipelineSummary:
     selection_param = p.selection_param
     if p.needs_selection and not selection_param:
@@ -355,5 +433,6 @@ def to_summary(p: PipelineDef, enabled: bool) -> PipelineSummary:
         max_images=p.max_images,
         save_targets=p.save_targets,
         temperature=p.temperature,
+        required_models=_required_models(p),
         is_custom=p.is_custom,
     )

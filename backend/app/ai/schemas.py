@@ -40,6 +40,7 @@ class PipelineSummary(BaseModel):
     max_images: int = 0
     save_targets: List[str] = Field(default_factory=list)
     temperature: float = 0.2
+    required_models: List[str] = Field(default_factory=list)
     is_custom: bool = False
 
 
