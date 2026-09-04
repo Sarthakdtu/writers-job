@@ -913,43 +913,32 @@ export const BookOutlinerView = () => {
                       return (
                         <SortableChapterCard key={ch.id} ch={ch}>
                           <div className="literary-card rounded-2xl p-5 pl-9 space-y-3 relative">
-                            <div className="flex items-start justify-between">
-                              <div className="flex items-center gap-3">
-                                <div className="relative shrink-0">
-                                  {ch.image_url && (
-                                    <div className="h-14 w-14 overflow-hidden rounded-xl border border-[var(--border-subtle)]">
-                                      <img
-                                        src={ch.image_url}
-                                        alt={ch.title}
-                                        className="h-full w-full object-cover"
-                                      />
-                                    </div>
-                                  )}
-                                  {renamingId === ch.id ? (
-                                    <input
-                                      autoFocus
-                                      value={renamingValue}
-                                      onChange={(e) => setRenamingValue(e.target.value)}
-                                      onBlur={() => handleRenameChapter(ch)}
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter') handleRenameChapter(ch);
-                                        if (e.key === 'Escape') setRenamingId(null);
-                                      }}
-                                      disabled={renamingLoading}
-                                      className={`absolute top-0 left-0 rounded-xl bg-[var(--accent)] p-2.5 text-white font-bold font-mono text-sm w-16 text-center border border-[var(--accent)] outline-none z-10 shadow-md ${ch.image_url ? 'bg-opacity-90 backdrop-blur-sm' : ''}`}
-                                    />
-                                  ) : (
-                                    <button
-                                      onClick={() => { setRenamingId(ch.id); setRenamingValue(ch.id); }}
-                                      title="Click to rename chapter number"
-                                      className={`absolute top-0 left-0 rounded-xl font-bold font-mono text-sm z-10 shadow-md transition-shadow hover:ring-2 hover:ring-[var(--accent)]/30 ${ch.image_url ? 'bg-[var(--accent)] text-white p-2.5 bg-opacity-90 backdrop-blur-sm' : 'bg-[var(--accent-light)] text-[var(--accent)] p-2.5'}`}
-                                    >
-                                      Ch {ch.id}
-                                    </button>
-                                  )}
-                                </div>
-                                <div>
-                                  <h4 className="font-prose text-lg font-bold text-[var(--text-main)]">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex items-center gap-3 min-w-0">
+                                {renamingId === ch.id ? (
+                                  <input
+                                    autoFocus
+                                    value={renamingValue}
+                                    onChange={(e) => setRenamingValue(e.target.value)}
+                                    onBlur={() => handleRenameChapter(ch)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') handleRenameChapter(ch);
+                                      if (e.key === 'Escape') setRenamingId(null);
+                                    }}
+                                    disabled={renamingLoading}
+                                    className="shrink-0 rounded-xl bg-[var(--accent)] p-2.5 text-white font-bold font-mono text-sm w-16 text-center border border-[var(--accent)] outline-none"
+                                  />
+                                ) : (
+                                  <button
+                                    onClick={() => { setRenamingId(ch.id); setRenamingValue(ch.id); }}
+                                    title="Click to rename chapter number"
+                                    className="shrink-0 rounded-xl bg-[var(--accent-light)] p-2.5 text-[var(--accent)] font-bold font-mono text-sm hover:ring-2 hover:ring-[var(--accent)]/30 transition-shadow"
+                                  >
+                                    Ch {ch.id}
+                                  </button>
+                                )}
+                                <div className="min-w-0">
+                                  <h4 className="font-prose text-lg font-bold text-[var(--text-main)] truncate">
                                     {ch.title}
                                   </h4>
                                   <div className="flex items-center gap-2 mt-0.5 text-xs text-[var(--text-muted)]">
@@ -982,34 +971,45 @@ export const BookOutlinerView = () => {
                                 </div>
                               </div>
 
-                              {canUse('ai.panel') && (
+                              <div className="flex items-center gap-2 shrink-0">
+                                {ch.image_url && (
+                                  <div className="h-10 w-10 overflow-hidden rounded-lg border border-[var(--border-subtle)]">
+                                    <img
+                                      src={ch.image_url}
+                                      alt={ch.title}
+                                      className="h-full w-full object-cover"
+                                    />
+                                  </div>
+                                )}
+                                {canUse('ai.panel') && (
+                                  <button
+                                    onClick={() => handleChapterArt(ch.id)}
+                                    disabled={!!artJobs[ch.id]}
+                                    title="Generate cover art from the chapter (AI)"
+                                    className="p-2 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] disabled:opacity-40"
+                                  >
+                                    {artJobs[ch.id] ? (
+                                      <Loader2 className="h-4 w-4 animate-spin text-[var(--accent)]" />
+                                    ) : (
+                                      <Sparkles className="h-4 w-4" />
+                                    )}
+                                  </button>
+                                )}
                                 <button
-                                  onClick={() => handleChapterArt(ch.id)}
-                                  disabled={!!artJobs[ch.id]}
-                                  title="Generate cover art from the chapter (AI)"
-                                  className="p-2 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] disabled:opacity-40"
+                                  onClick={() => {
+                                    setChapterForm({
+                                      id: ch.id,
+                                      title: ch.title,
+                                      pov_character_id: ch.pov_character_id || '',
+                                      target_word_count: ch.target_word_count || 0,
+                                    });
+                                    setShowChapterModal(true);
+                                  }}
+                                  className="p-2 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"
                                 >
-                                  {artJobs[ch.id] ? (
-                                    <Loader2 className="h-4 w-4 animate-spin text-[var(--accent)]" />
-                                  ) : (
-                                    <Sparkles className="h-4 w-4" />
-                                  )}
+                                  <Edit3 className="h-4 w-4" />
                                 </button>
-                              )}
-                              <button
-                                onClick={() => {
-                                  setChapterForm({
-                                    id: ch.id,
-                                    title: ch.title,
-                                    pov_character_id: ch.pov_character_id || '',
-                                    target_word_count: ch.target_word_count || 0,
-                                  });
-                                  setShowChapterModal(true);
-                                }}
-                                className="p-2 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"
-                              >
-                                <Edit3 className="h-4 w-4" />
-                              </button>
+                              </div>
                             </div>
 
                             {artErrors[ch.id] && (
