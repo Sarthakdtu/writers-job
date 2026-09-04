@@ -163,6 +163,7 @@ export const CharacterRosterView = () => {
 
   const detailTabs = [
     { id: 'notes', label: 'Notes', icon: StickyNote },
+    { id: 'summary', label: 'Summary', icon: Sparkles },
     { id: 'quotes', label: 'Quotes', icon: Quote },
     { id: 'relationships', label: 'Relationships', icon: Heart },
     { id: 'timeline', label: 'Timeline', icon: Clock },
@@ -180,14 +181,6 @@ export const CharacterRosterView = () => {
       if (res.ok) {
         const data = await res.json();
         setCharacters(data);
-        if (data.length > 0) {
-          const sorted = [...data].sort((a, b) => {
-            const ca = rosterClicks[`${activeStory.id}:${a.id}`] || 0;
-            const cb = rosterClicks[`${activeStory.id}:${b.id}`] || 0;
-            return cb - ca;
-          });
-          setSelectedChar(sorted[0]);
-        }
       }
     } catch (err) {
       console.error('Failed to fetch characters:', err);
@@ -813,6 +806,63 @@ export const CharacterRosterView = () => {
       ? [selectedChar.bio]
       : [];
 
+  // --- Explore / Summary derived data ---
+  const sortedRoster = [...characters].sort((a, b) => {
+    const ca = rosterClicks[`${activeStory.id}:${a.id}`] || 0;
+    const cb = rosterClicks[`${activeStory.id}:${b.id}`] || 0;
+    return cb - ca;
+  });
+  const selectedCharIndex = sortedRoster.findIndex((c) => c.id === selectedChar?.id);
+  const storyCitiesByLower = new Map(storyCities.map((c) => [c.name.toLowerCase(), c]));
+
+  // Cross-links: characters ↔ related characters via declared relationships
+  const relatedCharIds = (selectedChar?.relationships || []).map((r) => r.character_id);
+  const relatedCharacters = characters.filter((c) => relatedCharIds.includes(c.id));
+
+  // Cross-links: characters ↔ locations (home + all locations referenced in their data)
+  const charLinkedCities = selectedChar
+    ? characters
+        .filter((c) => selectedChar.relationships?.some((r) => r.character_id === c.id))
+        .map((c) => c.location)
+        .filter(Boolean)
+        .concat(selectedChar.location ? [selectedChar.location] : [])
+        .map((name) => storyCitiesByLower.get(name.toLowerCase()))
+        .filter(Boolean)
+        .filter((c, i, arr) => arr.findIndex((x) => x.id === c.id) === i)
+    : [];
+
+  // Cross-links: artifacts that belong to this character OR are in their home location
+  const charLinkedArtifacts = selectedChar
+    ? storyArtifacts.filter(
+        (a) =>
+          (a.belongs_to || []).includes(selectedChar.id) ||
+          (selectedChar.artifact_ids || []).includes(a.id) ||
+          (selectedChar.location && a.location && a.location.toLowerCase() === selectedChar.location.toLowerCase())
+      )
+    : [];
+
+  // Cross-links: mechanics this character uses
+  const charLinkedMechanics = selectedChar
+    ? storyMechanics.filter((m) => (selectedChar.mechanic_ids || []).includes(m.id))
+    : [];
+
+  // Summary stats
+  const summaryStats = selectedChar
+    ? [
+        { label: 'Appearances', value: appearances?.chapters?.length ?? 0, icon: Layers },
+        { label: 'Chapters (POV)', value: appearances?.chapters?.filter((ch) => ch.is_pov).length ?? 0, icon: FileText },
+        { label: 'Books', value: appearances?.books?.length ?? 0, icon: BookOpen },
+        { label: 'Plot Beats', value: appearances?.plot_points?.length ?? 0, icon: GitCommit },
+        { label: 'Timeline Events', value: selectedChar.timeline_events?.length ?? 0, icon: Clock },
+        { label: 'Notes', value: characterNotes.length, icon: StickyNote },
+        { label: 'Quotes', value: selectedChar.quotes?.length ?? 0, icon: Quote },
+        { label: 'Relationships', value: selectedChar.relationships?.length ?? 0, icon: Heart },
+        { label: 'Artifacts', value: selectedChar.artifact_ids?.length ?? 0, icon: Gem },
+        { label: 'Mechanics', value: selectedChar.mechanic_ids?.length ?? 0, icon: Zap },
+        { label: 'Gallery', value: selectedChar.gallery?.length ?? 0, icon: ImageIcon },
+      ]
+    : [];
+
   return (
     <div className="space-y-8 animate-in fade-in">
       {entityMention.dropdown}
@@ -853,7 +903,7 @@ export const CharacterRosterView = () => {
                 ? `Search (${filteredCharacters.length})`
                 : letterFilter
                 ? `Characters "${letterFilter}" (${filteredCharacters.length})`
-                : `Top ${filteredCharacters.length} Most Clicked`}
+                : `Recent (${filteredCharacters.length})`}
             </span>
             <span className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-dim)]" />
@@ -889,7 +939,7 @@ export const CharacterRosterView = () => {
                     : 'bg-[var(--bg-base)] text-[var(--text-muted)] border border-[var(--border-color)] hover:border-[var(--accent)] hover:text-[var(--accent)]'
                 }`}
               >
-                Top {Math.min(10, characters.length)}
+                Recent {Math.min(10, characters.length)}
               </button>
               {uniqueLetters.map((letter) => (
                 <button
@@ -909,6 +959,23 @@ export const CharacterRosterView = () => {
 
           {characters.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {/* Add Character — rectangle plus cell, same size as character cards */}
+              <button
+                onClick={() => {
+                  setCharForm({ id: '', name: '', role: 'Protagonist', location: '', image_url: '', bio: '', persona: '' });
+                  setImageSourceMode('upload');
+                  setShowCharModal(true);
+                }}
+                className="h-44 literary-card rounded-2xl border-2 border-dashed border-[var(--border-color)] flex flex-col items-center justify-center gap-2 transition-all cursor-pointer hover:border-[var(--accent)] hover:shadow-md hover:bg-[var(--accent-light)]/20 overflow-hidden"
+              >
+                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--accent-light)] text-[var(--accent)] transition-colors hover:bg-[var(--accent)] hover:text-white">
+                  <Plus className="h-5 w-5" />
+                </span>
+                <span className="text-xs font-bold text-[var(--text-muted)] transition-colors hover:text-[var(--accent)]">
+                  New Character
+                </span>
+              </button>
+
               {filteredCharacters.map((char) => {
                 return (
                   <div
@@ -965,7 +1032,7 @@ export const CharacterRosterView = () => {
                       !letterFilter ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-dim)] hover:text-[var(--accent)]'
                     }`}
                   >
-                    Top
+                    Recent
                   </button>
                   {uniqueLetters.map((letter) => (
                     <button
@@ -1050,28 +1117,54 @@ export const CharacterRosterView = () => {
       )}
 
         {/* Active Character Detail & Matrix (full width once selected) */}
-        <div className="space-y-6">
+        <div key={selectedChar?.id || 'roster-landing'} className="space-y-6 animate-in fade-in duration-300">
           {selectedChar ? (
             <>
-              {/* Profile Card Header with Large Hero Portrait */}
+{/* Compact Profile Header */}
               <div className="literary-card rounded-2xl overflow-hidden">
-                {/* Hero Portrait */}
-                <div className="relative h-[28rem] w-full overflow-hidden bg-[var(--bg-base)]">
-                  {selectedChar.image_url ? (
-                    <img
-                      src={selectedChar.image_url}
-                      alt={selectedChar.name}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="h-full w-full flex items-center justify-center font-prose font-bold text-8xl text-[var(--accent)]/20 bg-gradient-to-br from-[var(--accent-light)] to-[var(--bg-base)]">
-                      {selectedChar.name.charAt(0).toUpperCase()}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-5">
+                  <div className="relative shrink-0">
+                    <div className="h-20 w-20 rounded-full overflow-hidden ring-2 ring-[var(--accent)]/40 shadow-lg bg-[var(--bg-base)]">
+                      {selectedChar.image_url ? (
+                        <img src={selectedChar.image_url} alt={selectedChar.name} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="h-full w-full flex items-center justify-center font-prose font-bold text-3xl text-[var(--accent)] bg-gradient-to-br from-[var(--accent-light)] to-[var(--bg-base)]">
+                          {selectedChar.name.charAt(0).toUpperCase()}
+                        </div>
+                      )}
                     </div>
-                  )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-card)] via-transparent to-transparent" />
+                    <span className="absolute bottom-0 right-0 rounded-full bg-[var(--accent)] text-white text-[10px] font-bold h-6 w-6 flex items-center justify-center ring-2 ring-[var(--bg-card)]">
+                      {selectedCharIndex + 1}
+                    </span>
+                  </div>
 
-                  {/* Action buttons overlay */}
-                  <div className="absolute top-4 right-4 flex items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="font-prose text-2xl font-bold text-[var(--text-main)] truncate">
+                        {selectedChar.name}
+                      </h2>
+                      <span className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent-light)] px-3 py-1 text-xs font-bold text-[var(--accent)] border border-[var(--border-subtle)]">
+                        <Award className="h-3.5 w-3.5" />
+                        {selectedChar.role || 'Character'}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                      {selectedChar.location && (
+                        <span className="inline-flex items-center gap-1 rounded-lg bg-[var(--bg-base)] px-3 py-1 text-xs font-semibold text-[var(--text-muted)] border border-[var(--border-subtle)]">
+                          <MapPin className="h-3.5 w-3.5 text-[var(--accent)]" />
+                          {selectedChar.location}
+                        </span>
+                      )}
+                      {selectedChar.persona && (
+                        <span className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent-light)] px-3 py-1 text-xs font-semibold text-[var(--accent)] border border-[var(--border-subtle)]" title={selectedChar.persona}>
+                          <Sparkles className="h-3.5 w-3.5" />
+                          Has persona
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
                     <button
                       onClick={() => {
                         setCharForm({
@@ -1086,78 +1179,186 @@ export const CharacterRosterView = () => {
                         setImageSourceMode(selectedChar.image_url?.startsWith('/api/stories/') ? 'upload' : 'url');
                         setShowCharModal(true);
                       }}
-                      className="p-2 rounded-lg bg-black/40 backdrop-blur-sm text-white hover:bg-[var(--accent)] transition-colors"
+                      className="p-2 rounded-lg border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors"
                       title="Edit Character"
                     >
                       <Edit3 className="h-4 w-4" />
                     </button>
                     <button
                       onClick={() => handleDeleteCharacter(selectedChar.id)}
-                      className="p-2 rounded-lg bg-black/40 backdrop-blur-sm text-white hover:bg-red-500 transition-colors"
+                      className="p-2 rounded-lg border border-[var(--border-color)] text-[var(--text-muted)] hover:text-red-500 hover:border-red-500 transition-colors"
                       title="Delete Character"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
                 </div>
-
-                {/* Name & Role Bar */}
-                <div className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h2 className="font-prose text-2xl font-bold text-[var(--text-main)]">
-                        {selectedChar.name}
-                      </h2>
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent-light)] px-3 py-1 text-xs font-bold text-[var(--accent)] border border-[var(--border-subtle)] mt-1">
-                        <Award className="h-3.5 w-3.5" />
-                        {selectedChar.role || 'Character'}
-                      </span>
-                      {selectedChar.location && (
-                        <span className="inline-flex items-center gap-1 rounded-lg bg-[var(--bg-base)] px-3 py-1 text-xs font-semibold text-[var(--text-muted)] border border-[var(--border-subtle)] mt-1 ml-1.5">
-                          <MapPin className="h-3.5 w-3.5 text-[var(--accent)]" />
-                          {selectedChar.location}
-                        </span>
-                      )}
-                      {selectedChar.persona && (
-                        <span className="mt-1 ml-1 inline-flex items-center gap-1 rounded-lg bg-[var(--accent-light)] px-3 py-1 text-xs font-semibold text-[var(--accent)] border border-[var(--border-subtle)]" title={selectedChar.persona}>
-                          <Sparkles className="h-3.5 w-3.5" />
-                          Has persona
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
               </div>
 
-{/* Tabbed Sub-Sections: column icon tab bar + active tab content */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                {/* Column tab bar */}
-                <div className="lg:col-span-3 xl:col-span-2">
-                  <div className="literary-card rounded-2xl p-2 flex gap-1 md:flex-col overflow-x-auto lg:sticky lg:top-6">
-                    {detailTabs.map((tab) => {
-                      const active = activeDetailTab === tab.id;
-                      const TabIcon = tab.icon;
-                      return (
-                        <button
-                          key={tab.id}
-                          onClick={() => setActiveDetailTab(tab.id)}
-                          className={`flex shrink-0 items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-semibold transition-all cursor-pointer md:w-full ${
-                            active
-                              ? 'bg-[var(--accent)] text-white shadow-md'
-                              : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]'
-                          }`}
-                          title={tab.label}
-                        >
-                          <TabIcon className="h-4 w-4 shrink-0" />
-                          <span>{tab.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
+{/* Horizontal Tab Bar + Active Tab Content */}
+              <div>
+                {/* Horizontal tab bar */}
+                <div className="literary-card rounded-2xl p-2 flex gap-1.5 overflow-x-auto mb-6">
+                  {detailTabs.map((tab) => {
+                    const active = activeDetailTab === tab.id;
+                    const TabIcon = tab.icon;
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveDetailTab(tab.id)}
+                        className={`flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all cursor-pointer ${
+                          active
+                            ? 'bg-[var(--accent)] text-white shadow-md'
+                            : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]'
+                        }`}
+                        title={tab.label}
+                      >
+                        <TabIcon className="h-5 w-5 shrink-0" />
+                        <span>{tab.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
 
                 {/* Active tab content */}
-                <div className="lg:col-span-9 xl:col-span-10 space-y-6">
+                <div className="space-y-6">
+                  {activeDetailTab === 'summary' && (
+                    <div className="space-y-6">
+                      {/* Stats grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                        {summaryStats.map((s) => {
+                          const Icon = s.icon;
+                          return (
+                            <div key={s.label} className="literary-card rounded-xl p-4 flex items-center gap-3">
+                              <span className="h-10 w-10 shrink-0 rounded-lg bg-[var(--accent-light)] flex items-center justify-center text-[var(--accent)]">
+                                <Icon className="h-5 w-5" />
+                              </span>
+                              <div className="min-w-0">
+                                <div className="text-xl font-bold text-[var(--text-main)] leading-none">{s.value}</div>
+                                <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-dim)] mt-1">{s.label}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Chapter range + travel span */}
+                      {appearances?.chapters && appearances.chapters.length > 0 && (
+                        <div className="literary-card rounded-2xl p-5 space-y-2">
+                          <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                            <BookOpen className="h-3.5 w-3.5 text-[var(--accent)]" />
+                            <span>Story Presence</span>
+                          </div>
+                          <p className="text-sm text-[var(--text-muted)]">
+                            Appears in <span className="font-bold text-[var(--accent)]">{appearances.chapters.length}</span> chapter
+                            {appearances.chapters.length !== 1 ? 's' : ''} across{' '}
+                            <span className="font-bold text-[var(--accent)]">{appearances.books.length}</span> book
+                            {appearances.books.length !== 1 ? 's' : ''}, with POV focus in{' '}
+                            <span className="font-bold text-[var(--accent)]">{appearances.chapters.filter((ch) => ch.is_pov).length}</span> chapter
+                            {appearances.chapters.filter((ch) => ch.is_pov).length !== 1 ? 's' : ''}.
+                          </p>
+                          <p className="text-xs italic text-[var(--text-dim)]">
+                            Connected to {appearances.plot_points.length} plot beat{appearances.plot_points.length !== 1 ? 's' : ''} — the story's backbone running through this character.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Cross-linked world web */}
+                      <div className="literary-card rounded-2xl p-5 space-y-4">
+                        <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                          <MapPin className="h-3.5 w-3.5 text-[var(--accent)]" />
+                          <span>Worldweb — Connected Entities</span>
+                        </div>
+
+                        {/* Locations */}
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-dim)]">Locations</span>
+                          <div className="mt-1.5 flex flex-wrap gap-1.5">
+                            {charLinkedCities.length > 0 ? (
+                              charLinkedCities.map((c) => (
+                                <span key={c.id} className="inline-flex items-center gap-1 rounded-lg bg-[var(--bg-base)] px-2.5 py-1 text-xs font-semibold text-[var(--text-muted)] border border-[var(--border-subtle)]">
+                                  <MapPin className="h-3 w-3 text-[var(--accent)]" />
+                                  {c.name}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-xs italic text-[var(--text-dim)]">No linked locations yet.</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Related characters */}
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-dim)]">Characters</span>
+                          <div className="mt-1.5 flex flex-wrap gap-1.5">
+                            {relatedCharacters.length > 0 ? (
+                              relatedCharacters.map((c) => {
+                                const rel = selectedChar?.relationships?.find((r) => r.character_id === c.id);
+                                return (
+                                  <button
+                                    key={c.id}
+                                    onClick={() => { bumpClick(c); setSelectedChar(c); }}
+                                    className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--bg-base)] border border-[var(--border-subtle)] py-1 pl-1 pr-2.5 text-xs font-semibold text-[var(--text-main)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-all cursor-pointer"
+                                  >
+                                    <span className="h-5 w-5 rounded-full overflow-hidden bg-[var(--accent-light)] ring-1 ring-[var(--accent)]/30">
+                                      {c.image_url ? (
+                                        <img src={c.image_url} alt={c.name} className="h-full w-full object-cover" />
+                                      ) : (
+                                        <span className="h-full w-full flex items-center justify-center text-[9px] font-bold text-[var(--accent)]">
+                                          {c.name.charAt(0)}
+                                        </span>
+                                      )}
+                                    </span>
+                                    {c.name}
+                                    {rel?.label && (
+                                      <span className="text-[9px] font-bold uppercase text-[var(--accent)]">· {rel.label}</span>
+                                    )}
+                                  </button>
+                                );
+                              })
+                            ) : (
+                              <span className="text-xs italic text-[var(--text-dim)]">No declared relationships yet.</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Artifacts */}
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-dim)]">Artifacts</span>
+                          <div className="mt-1.5 flex flex-wrap gap-1.5">
+                            {charLinkedArtifacts.length > 0 ? (
+                              charLinkedArtifacts.map((a) => (
+                                <span key={a.id} className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent-light)]/50 px-2.5 py-1 text-xs font-semibold text-[var(--accent)] border border-[var(--border-subtle)]" title={a.properties || a.type}>
+                                  <Gem className="h-3 w-3" />
+                                  {a.name}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-xs italic text-[var(--text-dim)]">No linked artifacts yet.</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Mechanics */}
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-dim)]">Mechanics</span>
+                          <div className="mt-1.5 flex flex-wrap gap-1.5">
+                            {charLinkedMechanics.length > 0 ? (
+                              charLinkedMechanics.map((m) => (
+                                <span key={m.id} className="inline-flex items-center gap-1 rounded-lg bg-[var(--bg-base)] px-2.5 py-1 text-xs font-semibold text-[var(--text-muted)] border border-[var(--border-subtle)]">
+                                  <Zap className="h-3 w-3 text-[var(--accent)]" />
+                                  {m.name || m.magic_system || m.technology_level || 'Mechanic'}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-xs italic text-[var(--text-dim)]">No linked mechanics yet.</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {activeDetailTab === 'notes' && (
                     <div className="literary-card rounded-2xl p-6 space-y-3">
                       <div className="flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] pb-3">

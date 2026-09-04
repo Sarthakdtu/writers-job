@@ -52,5 +52,5 @@ When a planned feature is fully implemented:
    git mv plans/<feature>.md plans/implemented/<feature>.md
    ```
 2. Update the tables above (remove the row from **Planned**, add it to **Implemented**).
-3. Record the change in `CHANGELOG.md`.
+3. Record the change in `CHANGELOG/YYYY-MM-DD.md` (create if needed).
 4. Update the relevant sections of `AGENTS.md` if the codebase knowledge needs to reflect the new functionality.

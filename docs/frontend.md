@@ -92,7 +92,10 @@ live in `components/`.
 - `DashboardView.jsx` — Per-story dashboard: overview, fun-facts, theme, memorable quotes
 - `WorldbuildingView.jsx` — Tabbed: cities/mechanics/factions/artifacts/glossary/gallery
 - `CharacterRosterView.jsx` — Roster, gallery, artifacts, mechanics (linked powers via
-  `mechanic_ids`), appearances, timeline, relationships
+  `mechanic_ids`), appearances, timeline, relationships. Landing view: selection grid + a
+  horizontal "Explore the cast" title-card strip (first cell = Add Character). Detail view:
+  compact circled-portrait header, horizontal tab bar (Notes default, then Summary), and a
+  **Summary** tab (stats grid + Story Presence blurb + Worldweb cross-links)
 - `CharacterMapView.jsx` — Force-directed relationship graph (react-force-graph-2d);
   clickable edges, strength filter, hide-isolated, declared relationship labels on edges
 - `BookOutlinerView.jsx` — Book/chapter tree, plot beats, arcs, POV tracker,

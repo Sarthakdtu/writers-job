@@ -17,7 +17,8 @@ from app.schemas import (
     WorldEntitySummary,
 )
 from app.file_utils import (
-    read_json_safe, write_json_safe, read_text_safe, write_text_safe, delete_file_safe
+    read_json_safe, write_json_safe, read_text_safe, write_text_safe, delete_file_safe,
+    extract_mentioned_character_ids,
 )
 
 
@@ -404,8 +405,8 @@ class FileManager:
 
         pov_counter: Counter = Counter()
         for ch in all_chapters:
-            if ch.pov_character_id:
-                pov_counter[ch.pov_character_id] += 1
+            for pid in (ch.pov_character_ids or []):
+                pov_counter[pid] += 1
         char_name_map = {c.id: c.name for c in characters}
         pov_dist = [PovEntry(character_id=cid, name=char_name_map.get(cid, cid), count=cnt)
                     for cid, cnt in pov_counter.most_common()]
@@ -488,8 +489,9 @@ class FileManager:
         char_book_counts: Dict[str, set] = {c.id: set() for c in characters}
         for book in books:
             for ch in self.list_chapters(story_slug, book.id):
-                if ch.pov_character_id and ch.pov_character_id in char_book_counts:
-                    char_book_counts[ch.pov_character_id].add(book.id)
+                for pid in (ch.pov_character_ids or []):
+                    if pid in char_book_counts:
+                        char_book_counts[pid].add(book.id)
             plot = self.get_plot(story_slug, book.id)
             for beat in plot.beats:
                 for cid in beat.character_ids:
@@ -705,9 +707,10 @@ class FileManager:
             # Check chapters
             chapters = self.list_chapters(story_slug, book.id)
             for ch in chapters:
-                is_pov = (ch.pov_character_id == char_id)
+                is_pov = (char_id in (ch.pov_character_ids or []))
                 scene_ref = (char_id in (ch.scene_breakdown or ""))
-                if is_pov or scene_ref:
+                is_interactor = (char_id in (ch.interacting_character_ids or []))
+                if is_pov or scene_ref or is_interactor:
                     found_chapters[f"{book.id}-{ch.id}"] = AppearanceChapter(
                         id=ch.id,
                         book_id=book.id,
@@ -1213,6 +1216,11 @@ class FileManager:
         prose = read_text_safe(ch_md_path)
         chapter.word_count = len(re.findall(r'\b\w+\b', prose))
 
+        # Auto-populate interacting_character_ids from @mentions in prose
+        if prose.strip():
+            characters = self.list_characters(story_slug)
+            chapter.interacting_character_ids = extract_mentioned_character_ids(prose, characters)
+
         if not chapter.order:
             existing = self.list_chapters(story_slug, book_id)
             chapter.order = max([c.order or 0 for c in existing] or [0]) + 1
@@ -1349,11 +1357,13 @@ class FileManager:
         ch_md_path = self.get_chapter_md_path(story_slug, book_id, chapter_id)
         write_text_safe(ch_md_path, content)
 
-        # Update word count in chapter JSON
+        # Update word count and @mention interactors from markdown content
         word_count = len(re.findall(r'\b\w+\b', content))
         chapter = self.get_chapter(story_slug, book_id, chapter_id)
         if chapter:
             chapter.word_count = word_count
+            characters = self.list_characters(story_slug)
+            chapter.interacting_character_ids = extract_mentioned_character_ids(content, characters)
             ch_json_path = self.get_chapter_json_path(story_slug, book_id, chapter_id)
             write_json_safe(ch_json_path, chapter.model_dump())
 

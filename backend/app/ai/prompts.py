@@ -159,6 +159,17 @@ TASKS: Dict[str, str] = {
         "worldbuilding gallery (2-4 sentences, evocative but concrete)."
     ),
 
+    # chapter-art pipeline
+    "chapter_art_prompt": (
+        "You are an art director writing a Stable Diffusion prompt for a chapter illustration.\n\n"
+        "Using the story context, chapter outline, POV character details, location, and prose "
+        "below, write a single, detailed image generation prompt (one paragraph, no line breaks) "
+        "that captures the scene's mood, composition, lighting, and key visual elements.\n\n"
+        "If reference images are attached, incorporate their style and visual details.\n\n"
+        "Output ONLY the prompt text, nothing else."
+    ),
+    "chapter_art_generate": "",
+
     # custom skill placeholder (prompt arrives from the stored skill; key is its id)
 }
 
@@ -169,6 +180,8 @@ STAGE_LABELS: Dict[str, str] = {
     "notes_group": "Grouping notes…",
     "art_describe": "Describing the art…",
     "art_polish": "Polishing the caption…",
+    "chapter_art_prompt": "Writing image prompt…",
+    "chapter_art_generate": "Generating illustration…",
 }
 
 ROUTER_SYSTEM = (
@@ -230,6 +243,8 @@ def step_messages(
     custom_prompt: Optional[str] = None,
     input_kind: str = "story_context",
     attach_context: bool = True,
+    selection: str = "",
+    perspective: str = "",
 ) -> List[Dict[str, Any]]:
     """Compose system+user messages for a single pipeline step."""
     if prompt_key in ("ocr_extract", "ocr_extract_all", "art_describe"):
@@ -270,6 +285,10 @@ def step_messages(
         ]
 
     task = TASKS.get(prompt_key, "")
+    if "{{selection}}" in task:
+        task = task.replace("{{selection}}", selection)
+    if "{{perspective}}" in task:
+        task = task.replace("{{perspective}}", perspective)
     if prev_output:
         task = f"{task}\n\nReference transcription:\n{prev_output}"
     return build_analysis_messages(

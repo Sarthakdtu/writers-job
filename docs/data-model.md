@@ -44,7 +44,10 @@ All request/response bodies are typed with Pydantic v2 models. The core entities
   (`PlotSubsection`: `title`, `description`), `google_doc_url`.
 - **`Chapter`** — `id`, `title`, `order` (int, 1-based reading order — set by the
   drag-and-drop reorder feature; defaulted to `max(existing)+1` on save when omitted),
-  `pov_character_id`, `scene_breakdown`, `markdown_file_path`,
+  `pov_character_ids[]` (list of character IDs whose POV this chapter covers — first
+  element is treated as the primary POV for AI context), `interacting_character_ids[]`
+  (auto-populated from `@CharacterName` mentions in the markdown prose on save),
+  `scene_breakdown`, `markdown_file_path`,
   `word_count`, `target_word_count` (optional per-chapter pacing target; shown as a progress
   bar on the Book Outliner chapter card), `google_doc_id`, `image_url` (optional generated
   chapter illustration, set by the `chapter_art` AI skill).
@@ -108,3 +111,6 @@ Every story lives at `data/stories/<story-slug>/`:
   `ch-<id>` base name. Deleting/editing a chapter must touch both.
 - `word_count` on a chapter is **derived** from the `.md` file whenever the chapter is
   saved (`file_manager.save_chapter`) or prose is saved (`save_chapter_prose`).
+- `interacting_character_ids` on a chapter is **auto-populated** from `@CharacterName`
+  mentions in the markdown prose whenever the chapter or prose is saved. The parser
+  matches character names case-insensitively and returns the matched character IDs.

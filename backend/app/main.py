@@ -415,7 +415,7 @@ class SaveAIDraftPayload(BaseModel):
     title: str = ""
     content: str
     scene_breakdown: str = ""
-    pov_character_id: Optional[str] = None
+    pov_character_ids: List[str] = []
 
 
 @app.post("/api/stories/{story_id}/books/{book_id}/chapters/from-ai", response_model=Chapter)
@@ -433,7 +433,7 @@ def save_ai_draft_as_chapter(story_id: str, book_id: str, payload: SaveAIDraftPa
         id=ch_id,
         title=title,
         scene_breakdown=payload.scene_breakdown or "",
-        pov_character_id=payload.pov_character_id,
+        pov_character_ids=payload.pov_character_ids or [],
     )
     saved = file_manager.save_chapter(story_id, book_id, chapter)
     file_manager.save_chapter_prose(story_id, book_id, ch_id, payload.content)
@@ -691,9 +691,9 @@ async def chapter_art_suggestions(story_id: str, book_id: str, chapter_id: str):
     character_id = None
     location_name = None
 
-    if chapter and chapter.pov_character_id:
-        character_id = chapter.pov_character_id
-        char = file_manager.get_character(story_id, chapter.pov_character_id)
+    if chapter and chapter.pov_character_ids:
+        character_id = chapter.pov_character_ids[0]
+        char = file_manager.get_character(story_id, character_id)
         if char:
             location_name = char.location or None
             img = char.image_url or ""

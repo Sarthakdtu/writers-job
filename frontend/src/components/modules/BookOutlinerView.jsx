@@ -111,7 +111,7 @@ export const BookOutlinerView = () => {
   const [bookForm, setBookForm] = useState({ id: '', title: '', order: 1, target_word_count: 50000 });
   const [editingBookId, setEditingBookId] = useState(null);
   const [editingBookTitle, setEditingBookTitle] = useState('');
-  const [chapterForm, setChapterForm] = useState({ id: '', title: '', pov_character_id: '', target_word_count: 0 });
+  const [chapterForm, setChapterForm] = useState({ id: '', title: '', pov_character_ids: [], interacting_character_ids: [], target_word_count: 0 });
   const [beatForm, setBeatForm] = useState({ id: '', title: '', description: '', chapter_id: '', character_ids: [] });
   const [arcForm, setArcForm] = useState({ character_id: '', arc_summary: '', starting_state: '', ending_state: '', key_milestones: '' });
 
@@ -472,7 +472,8 @@ export const BookOutlinerView = () => {
       id: chId,
       title: chapterForm.title,
       order: existing?.order || chapters.length + 1,
-      pov_character_id: chapterForm.pov_character_id || null,
+      pov_character_ids: chapterForm.pov_character_ids || [],
+      interacting_character_ids: chapterForm.interacting_character_ids || [],
       scene_breakdown: existing?.scene_breakdown || '',
       target_word_count: Number(chapterForm.target_word_count) || 0,
     };
@@ -528,7 +529,8 @@ export const BookOutlinerView = () => {
           id: ch.id,
           title: ch.title,
           order: ch.order,
-          pov_character_id: ch.pov_character_id || null,
+          pov_character_ids: ch.pov_character_ids || [],
+          interacting_character_ids: ch.interacting_character_ids || [],
           scene_breakdown: editingSceneText,
         }),
       });
@@ -880,7 +882,7 @@ export const BookOutlinerView = () => {
                   )}
                   <button
                     onClick={() => {
-                      setChapterForm({ id: '', title: '', pov_character_id: '' });
+                      setChapterForm({ id: '', title: '', pov_character_ids: [], interacting_character_ids: [], target_word_count: 0 });
                       setShowChapterModal(true);
                     }}
                     className="flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-3.5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-[var(--accent-hover)] transition-all cursor-pointer"
@@ -909,7 +911,7 @@ export const BookOutlinerView = () => {
                 <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleChapterDragEnd}>
                   <SortableContext items={pageChapters.map(c => c.id)} strategy={verticalListSortingStrategy}>
                     {pageChapters.map((ch) => {
-                      const povChar = characters.find((c) => c.id === ch.pov_character_id);
+                      const povChars = (ch.pov_character_ids || []).map(id => characters.find(c => c.id === id)).filter(Boolean);
                       return (
                         <SortableChapterCard key={ch.id} ch={ch}>
                           <div className="literary-card rounded-2xl p-5 pl-9 space-y-3 relative">
@@ -946,9 +948,9 @@ export const BookOutlinerView = () => {
                                     {ch.target_word_count > 0 && (
                                       <span className="text-[var(--text-dim)]">/ {ch.target_word_count.toLocaleString()} target</span>
                                     )}
-                                    {povChar && (
+                                    {povChars.length > 0 && (
                                       <span className="inline-flex items-center gap-1 rounded-md bg-[var(--accent-light)] px-2 py-0.5 text-[10px] font-bold text-[var(--accent)]">
-                                        <Users className="h-3 w-3" /> POV: {povChar.name}
+                                        <Users className="h-3 w-3" /> POV: {povChars.map(c => c.name).join(', ')}
                                       </span>
                                     )}
                                   </div>
@@ -1000,7 +1002,8 @@ export const BookOutlinerView = () => {
                                     setChapterForm({
                                       id: ch.id,
                                       title: ch.title,
-                                      pov_character_id: ch.pov_character_id || '',
+                                      pov_character_ids: ch.pov_character_ids || [],
+                                      interacting_character_ids: ch.interacting_character_ids || [],
                                       target_word_count: ch.target_word_count || 0,
                                     });
                                     setShowChapterModal(true);
@@ -1275,7 +1278,7 @@ export const BookOutlinerView = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                 {characters.map((char) => {
-                  const povChapters = chapters.filter((ch) => ch.pov_character_id === char.id);
+                  const povChapters = chapters.filter((ch) => (ch.pov_character_ids || []).includes(char.id));
                   const povWordCount = povChapters.reduce((sum, ch) => sum + (ch.word_count || 0), 0);
                   const sharePercent = totalWordCount > 0 ? Math.round((povWordCount / totalWordCount) * 100) : 0;
 
@@ -1536,13 +1539,28 @@ export const BookOutlinerView = () => {
 
               <div>
                 <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
-                  POV Character
+                  POV Characters
                 </label>
                 <CharacterPicker
                   characters={characters}
-                  selected={chapterForm.pov_character_id}
-                  onSelect={(id) => setChapterForm({ ...chapterForm, pov_character_id: id })}
-                  placeholder="-- Select POV Character --"
+                  selected={chapterForm.pov_character_ids || []}
+                  onSelect={(ids) => setChapterForm({ ...chapterForm, pov_character_ids: ids })}
+                  multi
+                  placeholder="Select POV characters..."
+                  emptyMessage="No characters yet — add some to the roster first."
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
+                  Interacting Characters (auto-detected from @mentions)
+                </label>
+                <CharacterPicker
+                  characters={characters}
+                  selected={chapterForm.interacting_character_ids || []}
+                  onSelect={(ids) => setChapterForm({ ...chapterForm, interacting_character_ids: ids })}
+                  multi
+                  placeholder="Select interacting characters..."
                   emptyMessage="No characters yet — add some to the roster first."
                 />
               </div>

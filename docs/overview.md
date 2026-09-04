@@ -29,7 +29,8 @@ endpoints; the backend reads/writes files atomically.
 ```
 writer_job/
 ├── AGENTS.md                 ← Knowledge base index (this file links here)
-├── CHANGELOG.md              ← Dated codebase-knowledge update log
+├── CHANGELOG/                ← Dated changelog files (YYYY-MM-DD.md per date)
+│   └── INDEX.md              ← Index of all changelog dates
 ├── walkthrough.md            ← Original project walkthrough (architecture diagram + overview)
 ├── requirements.txt          ← Python backend dependencies
 ├── plans/                    ← Design drafts + features index — NOT implemented code
@@ -75,4 +76,4 @@ writer_job/
 > are NOT currently implemented code.
 >
 > **Lifecycle:** when a feature is implemented, move its plan doc to `plans/implemented/`
-> and update `plans/features.md`, `CHANGELOG.md`, and any affected docs in the same change.
+> and update `plans/features.md`, `CHANGELOG/YYYY-MM-DD.md`, and any affected docs in the same change.

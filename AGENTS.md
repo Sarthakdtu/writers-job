@@ -27,4 +27,5 @@ your task.
 
 > **KEEP UP TO DATE.** Whenever you change code in a way that affects functionality,
 > behavior, data shapes, routes, or file layout, update the relevant doc file in `docs/`
-> (or add a CHANGELOG entry in `CHANGELOG.md`).
+> and add a CHANGELOG entry in `CHANGELOG/YYYY-MM-DD.md` (create the file if it doesn't
+> exist for today's date). Update `CHANGELOG/INDEX.md` when you create a new date file.

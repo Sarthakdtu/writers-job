@@ -135,7 +135,8 @@ class Chapter(BaseModel):
     id: str
     title: str
     order: Optional[int] = 0
-    pov_character_id: Optional[str] = None
+    pov_character_ids: List[str] = Field(default_factory=list)
+    interacting_character_ids: List[str] = Field(default_factory=list)
     scene_breakdown: Optional[str] = ""
     markdown_file_path: Optional[str] = ""
     word_count: Optional[int] = 0

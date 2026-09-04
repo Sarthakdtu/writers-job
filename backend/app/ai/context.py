@@ -302,7 +302,7 @@ def _prose_for_character(fm, story, char_id, per_chapter=1400, max_chapters=4) -
     for book in fm.list_books(story.id):
         appearances = {}
         for ch in fm.list_chapters(story.id, book.id):
-            if ch.pov_character_id == char_id or char_id in (ch.scene_breakdown or ""):
+            if char_id in (ch.pov_character_ids or []) or char_id in (ch.scene_breakdown or ""):
                 prose = fm.read_chapter_prose(story.id, book.id, ch.id)
                 if prose.strip():
                     appearances.setdefault(book.title, []).append({"chapter": ch.title, "prose": prose})
@@ -319,7 +319,7 @@ def _dialogue_from_prose(fm, story, char_id, cap=4000) -> str:
     lines = []
     for book in fm.list_books(story.id):
         for ch in fm.list_chapters(story.id, book.id):
-            if ch.pov_character_id != char_id and char_id not in (ch.scene_breakdown or ""):
+            if char_id not in (ch.pov_character_ids or []) and char_id not in (ch.scene_breakdown or ""):
                 continue
             prose = fm.read_chapter_prose(story.id, book.id, ch.id)
             found = re.findall(r'"([^"\n]{4,})"', prose)
@@ -421,7 +421,7 @@ def build_context(
                 for b in fm.list_books(story.id) for beat in fm.get_plot(story.id, b.id).beats
             ],
             "chapters": [
-                {"book": b.title, "chapter": ch.title, "pov": ch.pov_character_id, "words": ch.word_count}
+                {"book": b.title, "chapter": ch.title, "pov": ch.pov_character_ids, "words": ch.word_count}
                 for b in fm.list_books(story.id) for ch in fm.list_chapters(story.id, b.id)
             ],
         },
@@ -483,7 +483,7 @@ def build_context(
         },
         "pov_balance": lambda: {
             "chapters": [
-                {"book": b.title, "chapter": ch.title, "pov": ch.pov_character_id, "words": ch.word_count}
+                {"book": b.title, "chapter": ch.title, "pov": ch.pov_character_ids, "words": ch.word_count}
                 for b in fm.list_books(story.id) for ch in fm.list_chapters(story.id, b.id)
             ],
         },
@@ -560,7 +560,7 @@ def _chapter_context(fm, story, params) -> Dict[str, Any]:
         "chapter": {
             "book": ch["book"].title,
             "title": ch["chapter"].title,
-            "pov": ch["chapter"].pov_character_id,
+            "pov": ch["chapter"].pov_character_ids,
             "scene_breakdown": cap_text(ch["chapter"].scene_breakdown or "", 1500),
             "word_count": ch["chapter"].word_count,
             "prose": slice_span(ch["prose"], BUDGET - 2000),
@@ -582,7 +582,7 @@ def _continue_context(fm, story, params) -> Dict[str, Any]:
     return {
         "chapter_tail": cap_text(prose[-3000:], 3000),
         "next_beat": {"title": beat.title, "description": cap_text(beat.description, 1500)} if beat else None,
-        "pov": ch["chapter"].pov_character_id,
+        "pov": ch["chapter"].pov_character_ids,
         "style_cues": cap_text(ch["chapter"].scene_breakdown or "", 1500),
     }
 
@@ -600,9 +600,9 @@ def _chapter_draft_context(fm, story, params) -> Dict[str, Any]:
     if not breakdown:
         breakdown = f"(No scene breakdown provided for {chapter.title or chapter.id} — write a coherent chapter advancing the attached plot beats.)"
 
-    pov_id = chapter.pov_character_id
+    pov_ids = chapter.pov_character_ids or []
     chars = {c.id: c for c in fm.list_characters(story.id)}
-    pov = chars.get(pov_id)
+    pov = chars.get(pov_ids[0]) if pov_ids else None
     pov_block = None
     if pov:
         pov_block = {
@@ -638,7 +638,7 @@ def _chapter_draft_context(fm, story, params) -> Dict[str, Any]:
         "book": {"id": ch["book"].id, "title": ch["book"].title},
         "chapter": {
             "id": chapter.id, "title": chapter.title,
-            "pov": pov_id,
+            "pov": pov_ids,
             "scene_breakdown": cap_text(breakdown, 6000),
             "word_count": chapter.word_count,
         },
@@ -666,7 +666,8 @@ def _chapter_art_context(fm, story, params) -> Dict[str, Any]:
 
     chapter = ch["chapter"]
     characters = {c.id: c for c in fm.list_characters(story.id)}
-    pov_char = characters.get(chapter.pov_character_id)
+    pov_ids = chapter.pov_character_ids or []
+    pov_char = characters.get(pov_ids[0]) if pov_ids else None
 
     cities = {c.name: c for c in fm.get_cities(story.id)}
     city = None
@@ -772,7 +773,7 @@ def _chapter_range_context(fm, story, params) -> Dict[str, Any]:
             "index": start_idx + idx + 1,
             "id": c.id,
             "title": c.title,
-            "pov": c.pov_character_id,
+            "pov": c.pov_character_ids,
             "scene_breakdown": cap_text(c.scene_breakdown or "", 800),
             "word_count": c.word_count,
             "prose": slice_span(raw, prose_alloc) if raw.strip() else "",
@@ -787,8 +788,8 @@ def _chapter_range_context(fm, story, params) -> Dict[str, Any]:
 
     char_ids = set()
     for c in chosen:
-        if c.pov_character_id:
-            char_ids.add(c.pov_character_id)
+        for pid in (c.pov_character_ids or []):
+            char_ids.add(pid)
     for b in beats:
         char_ids.update(b.get("character_ids") or [])
     chars = {
