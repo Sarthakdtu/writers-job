@@ -48,6 +48,9 @@ arcs, chapters/prose). Key behaviors to maintain:
 - `save_chapter` sets `markdown_file_path` to
   `books/book-<book_id>/chapters/ch-<id>.md` and re-derives `word_count`. When the payload
   does not supply `order`, it assigns `max(existing order) + 1`.
+- `clear_chapter_image_url` removes a chapter's illustration: it clears `Chapter.image_url`
+  (persisted back to `ch-<id>.json`) and, when the URL is a local `/api/stories/<slug>/assets/`
+  asset, deletes the file via `delete_asset` so the image is removed for good.
 - `list_chapters(..., reverse=False)` returns chapters sorted by `order` (with
   numeric-id tiebreak) — the order users set via drag-and-drop in the Book Outliner tree
   view. Passing `reverse=True` returns the descending order (driven by `?sort=desc`).
@@ -108,6 +111,8 @@ REST endpoints in `main.py`. The frontend calls these via the Vite dev proxy. Su
 - **Chapters:** `GET/POST .../books/{book_id}/chapters` (`GET` accepts optional
   `?sort=asc|desc`, default `asc`, controlling chapter display order),
   `GET/PUT/DELETE .../chapters/{ch_id}`,
+  `DELETE .../chapters/{ch_id}/art` (clears the chapter's `image_url` and deletes the
+  local asset file for good; returns the updated chapter),
   `POST .../books/{book_id}/chapters/reorder` (body `{chapter_ids: []}` — writes 1-based
   `order` back to each chapter for the drag-and-drop reorder feature),
   `GET .../chapters/{ch_id}/content` (alias `/prose`),

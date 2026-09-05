@@ -398,6 +398,18 @@ export const DraftEditorView = () => {
     }
   };
 
+  const handleRemoveChapterArt = async () => {
+    if (!activeStory || !selectedBookId || !selectedChId) return;
+    setArtError('');
+    try {
+      const res = await fetch(`/api/stories/${activeStory.id}/books/${selectedBookId}/chapters/${selectedChId}/art`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Could not delete chapter art.');
+      setCurrentChapter((prev) => (prev ? { ...prev, image_url: null } : prev));
+    } catch (err) {
+      setArtError(err.message || 'Could not delete chapter art.');
+    }
+  };
+
   const pollChapterArt = async (jobId, depth = 0) => {
     if (!activeStory || !pollAliveRef.current) return;
     if (depth > 300) { setArtJob(null); return; }
@@ -733,6 +745,17 @@ export const DraftEditorView = () => {
                     )}
                     <span>Cover Art</span>
                   </button>
+                  {currentChapter?.image_url && (
+                    <button
+                      onClick={handleRemoveChapterArt}
+                      disabled={!!artJob}
+                      className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[11px] font-semibold text-rose-400 border border-[var(--border-color)] bg-[var(--bg-base)] hover:bg-rose-400/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="Remove cover art and delete the image for good"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span>Remove Art</span>
+                    </button>
+                  )}
                   {artError && (
                     <span className="text-[11px] text-rose-400">{artError}</span>
                   )}

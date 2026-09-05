@@ -35,6 +35,7 @@ class Character(BaseModel):
 class WorldMechanics(BaseModel):
     id: str = ""
     name: str = ""
+    image_url: Optional[str] = ""
     magic_system: str = ""
     technology_level: str = ""
     global_rules: List[str] = Field(default_factory=list)
@@ -55,6 +56,7 @@ class Faction(BaseModel):
     description: str
     leader: Optional[str] = ""
     alignment: Optional[str] = ""
+    member_ids: List[str] = Field(default_factory=list)
 
 
 class Artifact(BaseModel):

@@ -841,7 +841,24 @@ class FileManager:
 
     def delete_character(self, story_slug: str, char_id: str) -> bool:
         char_path = self.get_character_path(story_slug, char_id)
-        return delete_file_safe(char_path)
+        deleted = delete_file_safe(char_path)
+        if deleted:
+            self.remove_character_from_factions(story_slug, char_id)
+        return deleted
+
+    def remove_character_from_factions(self, story_slug: str, char_id: str) -> None:
+        """
+        Drop a deleted character's id from every faction's member_ids so no
+        dangling references survive in world/factions.json.
+        """
+        factions = self.get_factions(story_slug)
+        changed = False
+        for faction in factions:
+            if char_id in (faction.member_ids or []):
+                faction.member_ids = [mid for mid in faction.member_ids if mid != char_id]
+                changed = True
+        if changed:
+            self.save_factions(story_slug, factions)
 
     def sync_story_backgrounds(self, story_slug: str) -> Optional[Story]:
         """
@@ -1238,6 +1255,25 @@ class FileManager:
             self.get_chapter_json_path(story_slug, book_id, chapter_id),
             ch.model_dump(),
         )
+        return ch
+
+    def clear_chapter_image_url(self, story_slug: str, book_id: str, chapter_id: str) -> Optional[Chapter]:
+        """Remove a chapter's illustration and delete its asset file for good (if local)."""
+        ch = self.get_chapter(story_slug, book_id, chapter_id)
+        if not ch:
+            return None
+        if ch.image_url:
+            clean = ch.image_url.split("?")[0].split("#")[0].strip()
+            prefix = f"/api/stories/{story_slug}/assets/"
+            if clean.startswith(prefix):
+                filename = clean[len(prefix):]
+                if filename:
+                    self.delete_asset(story_slug, filename)
+            ch.image_url = None
+            write_json_safe(
+                self.get_chapter_json_path(story_slug, book_id, chapter_id),
+                ch.model_dump(),
+            )
         return ch
 
     def get_chapter(self, story_slug: str, book_id: str, chapter_id: str) -> Optional[Chapter]:

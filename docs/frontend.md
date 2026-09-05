@@ -100,10 +100,12 @@ live in `components/`.
   clickable edges, strength filter, hide-isolated, declared relationship labels on edges
 - `BookOutlinerView.jsx` — Book/chapter tree, plot beats, arcs, POV tracker,
   per-chapter word-count target + progress bar, Find & Replace modal,
-  "Chapter Judge" sub-tab, `@` entity references
+  "Chapter Judge" sub-tab, `@` entity references; chapter art thumbnails include a
+  hover trash overlay to remove cover art (deletes the asset file for good)
 - `QuotesView.jsx` — Standalone quotes (text + note + tags) tab
 - `DraftEditorView.jsx` — Markdown + Google Docs dual mode, autosave; publishes
-  `loresmith:editor-context` window event when a chapter loads
+  `loresmith:editor-context` window event when a chapter loads; "Remove Art" button
+  deletes the chapter's cover art and its asset file
 - `SkillStudioView.jsx` — Skill Studio: custom skill CRUD with Simple/Advanced
   progressive toggle, router preview, entity focus picker, test-run
 - `EntityFocusPicker.jsx` — shared entity/focus picker for routing_sources

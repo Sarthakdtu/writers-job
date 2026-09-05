@@ -6,6 +6,8 @@
 
 | Date | File | Highlights |
 |------|------|------------|
+| 2026-09-06 | [2026-09-06.md](2026-09-06.md) | Ability blocks + magic/tech filters + detail modal + ability images; Factions attach characters (member avatars, cross-referential roster tab); Note reference tooltips only on hover (fix group-class collision) |
+| 2026-09-05 | [2026-09-05.md](2026-09-05.md) | Remove chapter cover art (deletes asset), Mobile / PWA migration plan (design only) |
 | 2026-09-04 | [2026-09-04.md](2026-09-04.md) | Character Roster revamp, Find & Replace, Recently Edited, Chapter Targets, Relationship Editor |
 | 2026-09-03 | [2026-09-03.md](2026-09-03.md) | Chapter Art (local diffusion), Characters link to multiple mechanics |
 | 2026-09-02 | [2026-09-02.md](2026-09-02.md) | Multiple world mechanics (array), Reusable CharacterPicker |

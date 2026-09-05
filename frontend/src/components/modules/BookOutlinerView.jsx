@@ -261,6 +261,18 @@ export const BookOutlinerView = () => {
     }
   };
 
+  const handleRemoveChapterArt = async (chapterId) => {
+    if (!activeStory || !selectedBook) return;
+    setArtErrors((prev) => ({ ...prev, [chapterId]: '' }));
+    try {
+      const res = await fetch(`/api/stories/${activeStory.id}/books/${selectedBook.id}/chapters/${chapterId}/art`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Could not delete chapter art.');
+      fetchBookDetails(selectedBook.id);
+    } catch (err) {
+      setArtErrors((prev) => ({ ...prev, [chapterId]: err.message || 'Could not delete chapter art.' }));
+    }
+  };
+
   const pollChapterArt = async (jobId, chapterId, depth = 0) => {
     if (!activeStory || !pollAliveRef.current) return;
     if (depth > 300) {
@@ -975,12 +987,20 @@ export const BookOutlinerView = () => {
 
                               <div className="flex items-center gap-2 shrink-0">
                                 {ch.image_url && (
-                                  <div className="h-10 w-10 overflow-hidden rounded-lg border border-[var(--border-subtle)]">
+                                  <div className="group relative h-10 w-10 overflow-hidden rounded-lg border border-[var(--border-subtle)]">
                                     <img
                                       src={ch.image_url}
                                       alt={ch.title}
                                       className="h-full w-full object-cover"
                                     />
+                                    <button
+                                      onClick={() => handleRemoveChapterArt(ch.id)}
+                                      disabled={!!artJobs[ch.id]}
+                                      title="Remove cover art and delete the image for good"
+                                      className="absolute inset-0 flex items-center justify-center bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-0"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
                                   </div>
                                 )}
                                 {canUse('ai.panel') && (

@@ -40,6 +40,7 @@ document (or the implementation, if done).
 | 1 | **Dashboard Insights** | Deeper dashboard insights cards (fun facts, writing progress, memorable quotes) — a design plan for richer per-story analytics UI. | `plans/dashboard-insights.md` |
 | 2 | **Google Drive Two-Way Sync** | Export **and** import stories between LoreSmith and Google Drive (the read/restore side of full two-way sync beyond the current backup). **Design/planning only — not implemented.** | `plans/google-drive-two-way-sync.md` |
 | 3 | **Telegram Integration** | Push story updates/receive writing commands via Telegram bot. **Not implemented** — treat as design only. | `plans/telegram-integration.md` |
+| 4 | **Mobile / PWA Migration** | Run the app on a phone as a PWA. Strategies for hosting the local backend (LAN/self-host, cloud, on-device IndexedDB), mobile UI hardening, and offline-first sync. **Design/planning only — not implemented.** | `plans/mobile-pwa-migration.md` |
 
 ---
 

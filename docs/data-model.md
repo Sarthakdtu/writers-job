@@ -24,9 +24,16 @@ All request/response bodies are typed with Pydantic v2 models. The core entities
   `description`, `book_ids[]`), `plot_point_ids[]`,
   `relationships[]` (`CharacterRelationship`: `character_id` + free-text `label` like
   sibling/rival/mentor — explicitly declared connections shown/merged in the Character Map).
-- **`WorldMechanics`** — `magic_system`, `technology_level`, `global_rules[]`.
+- **`WorldMechanics`** — `id`, `name`, `image_url` (optional ability art), `magic_system`,
+  `technology_level`, `global_rules[]`.
 - **`City`** — `id`, `name`, `region`, `atmosphere`, `image_url`, `key_locations[]`.
-- **`Faction`** — `id`, `name`, `description`, `leader`, `alignment`.
+- **`Faction`** — `id`, `name`, `description`, `leader`, `alignment`,
+  `member_ids[]` (character ids of faction/guild members; **single source of truth for
+  membership**). Shown as overlapping avatars on the Worldbuilding faction card and managed
+  from either side: the faction form's character picker OR the Character Roster's
+  "Factions" detail tab (join/leave). Because both views read/write `Faction.member_ids`,
+  membership is fully cross-referential. Deleted characters are stripped from every
+  faction's `member_ids` in `delete_character` → `remove_character_from_factions`.
 - **`Artifact`** — `id`, `name`, `type`, `properties`, `location`, `image_url`,
   `belongs_to[]` (character ids), `timeline[]` (TimelineEvent).
 - **`GlossaryTerm`** — `id`, `term`, `definition`, `category`.

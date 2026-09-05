@@ -30,6 +30,7 @@ import {
   GripVertical,
   Heart,
   ArrowRightLeft,
+  Shield,
 } from 'lucide-react';
 import { useStory } from '../../context/StoryContext';
 import { ArtifactFormModal } from '../ArtifactFormModal';
@@ -87,6 +88,10 @@ export const CharacterRosterView = () => {
   // Mechanics state
   const [storyMechanics, setStoryMechanics] = useState([]);
   const [attachMechanicId, setAttachMechanicId] = useState('');
+
+  // Factions state
+  const [storyFactions, setStoryFactions] = useState([]);
+  const [attachFactionId, setAttachFactionId] = useState('');
 
   // Gallery lightbox
   const [lightboxIndex, setLightboxIndex] = useState(null);
@@ -170,6 +175,7 @@ export const CharacterRosterView = () => {
     { id: 'gallery', label: 'Gallery', icon: ImageIcon },
     { id: 'artifacts', label: 'Artifacts', icon: Gem },
     { id: 'mechanics', label: 'Mechanics', icon: Zap },
+    { id: 'factions', label: 'Factions', icon: Shield },
     { id: 'appearances', label: 'Appearances', icon: Layers },
   ];
 
@@ -245,11 +251,27 @@ export const CharacterRosterView = () => {
     }
   };
 
+  const fetchStoryFactions = async () => {
+    if (!activeStory) return;
+    try {
+      const res = await fetch(`/api/stories/${activeStory.id}/world/factions`);
+      if (res.ok) {
+        const json = await res.json();
+        if (Array.isArray(json)) {
+          setStoryFactions(json);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch story factions:', err);
+    }
+  };
+
   useEffect(() => {
     fetchCharacters();
     fetchStoryArtifacts();
     fetchStoryCities();
     fetchStoryMechanics();
+    fetchStoryFactions();
     setSelectedChar(null);
     setLetterFilter(null);
     setSearchQuery('');
@@ -283,6 +305,7 @@ export const CharacterRosterView = () => {
     }
     fetchStoryArtifacts();
     fetchStoryMechanics();
+    fetchStoryFactions();
   }, [selectedChar, activeStory]);
 
   // Close gallery lightbox with Escape
@@ -490,6 +513,56 @@ export const CharacterRosterView = () => {
       ...selectedChar,
       mechanic_ids: (selectedChar.mechanic_ids || []).filter((id) => id !== mechanicId),
     });
+  };
+
+  // Persist the faction list. Faction.member_ids is the single source of truth
+  // for membership, so edits here are instantly reflected in the Worldbuilding
+  // faction cards (and vice versa) — fully cross-referential.
+  const saveFactionsData = async (factionsList) => {
+    if (!activeStory) return null;
+    try {
+      const res = await fetch(`/api/stories/${activeStory.id}/world/factions`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(factionsList),
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setStoryFactions(Array.isArray(saved) ? saved : factionsList);
+        return saved;
+      }
+    } catch (err) {
+      console.error('Failed to save factions:', err);
+    }
+    return null;
+  };
+
+  const handleAttachFaction = async () => {
+    if (!selectedChar || !attachFactionId) return;
+    await saveFactionsData(
+      storyFactions.map((f) =>
+        f.id === attachFactionId
+          ? { ...f, member_ids: [...new Set([...(f.member_ids || []), selectedChar.id])] }
+          : f
+      )
+    );
+    setAttachFactionId('');
+  };
+
+  const handleDetachFaction = async (factionId) => {
+    if (!selectedChar) return;
+    const faction = storyFactions.find((f) => f.id === factionId);
+    if (!faction) return;
+    const saved = await saveFactionsData(
+      storyFactions.map((f) =>
+        f.id === factionId
+          ? { ...f, member_ids: (f.member_ids || []).filter((id) => id !== selectedChar.id) }
+          : f
+      )
+    );
+    if (saved) {
+      trackRecentEdit(activeStory.id, { type: 'factions', id: faction.id, label: faction.name, tab: 'world' });
+    }
   };
 
   const handleSaveCharacter = async (e) => {
@@ -846,6 +919,11 @@ export const CharacterRosterView = () => {
     ? storyMechanics.filter((m) => (selectedChar.mechanic_ids || []).includes(m.id))
     : [];
 
+  // Cross-links: factions/guilds this character belongs to (via Faction.member_ids)
+  const charFactions = selectedChar
+    ? storyFactions.filter((f) => (f.member_ids || []).includes(selectedChar.id))
+    : [];
+
   // Summary stats
   const summaryStats = selectedChar
     ? [
@@ -859,6 +937,7 @@ export const CharacterRosterView = () => {
         { label: 'Relationships', value: selectedChar.relationships?.length ?? 0, icon: Heart },
         { label: 'Artifacts', value: selectedChar.artifact_ids?.length ?? 0, icon: Gem },
         { label: 'Mechanics', value: selectedChar.mechanic_ids?.length ?? 0, icon: Zap },
+        { label: 'Factions', value: charFactions.length, icon: Shield },
         { label: 'Gallery', value: selectedChar.gallery?.length ?? 0, icon: ImageIcon },
       ]
     : [];
@@ -1420,7 +1499,7 @@ export const CharacterRosterView = () => {
                       )}
 
                       {characterNotes.map((note, idx) => (
-                        <div key={idx} className="group flex items-start gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3">
+                        <div key={idx} className="group/note flex items-start gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3">
                           <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[var(--accent)]/10 text-[10px] font-bold text-[var(--accent)]">
                             {idx + 1}
                           </span>
@@ -1458,7 +1537,7 @@ export const CharacterRosterView = () => {
                               <p className="flex-1 whitespace-pre-wrap text-sm text-[var(--text-muted)] leading-relaxed font-prose">
                                 <EntityReferenceText text={note} refs={entityRefs} />
                               </p>
-                              <div className="mt-0.5 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                              <div className="mt-0.5 flex flex-col gap-1 opacity-0 group-hover/note:opacity-100 transition-all">
                                 <button
                                   onClick={() => startEditNote(idx, note)}
                                   className="rounded-md p-1 text-[var(--text-dim)] hover:bg-[var(--accent-light)] hover:text-[var(--accent)]"
@@ -2107,6 +2186,97 @@ export const CharacterRosterView = () => {
                       ) : (
                         <div className="col-span-full p-4 text-center text-xs italic text-[var(--text-dim)] border-2 border-dashed border-[var(--border-color)] rounded-xl">
                           No magic mechanics linked yet. Link existing world mechanics (powers, magic systems) to this character.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {activeDetailTab === 'factions' && (() => {
+                const attachedFactions = charFactions;
+                const availableFactions = storyFactions.filter(
+                  (f) => !attachedFactions.some((x) => x.id === f.id)
+                );
+
+                return (
+                  <div className="literary-card rounded-2xl p-6 space-y-4">
+                    <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
+                      <div className="flex items-center gap-2 font-semibold text-[var(--text-main)]">
+                        <Shield className="h-5 w-5 text-[var(--accent)]" />
+                        <span>Factions &amp; Guilds ({attachedFactions.length})</span>
+                      </div>
+                    </div>
+
+                    {/* Join an existing faction/guild */}
+                    {availableFactions.length > 0 && (
+                      <div className="flex items-center gap-2 p-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-base)]">
+                        <select
+                          value={attachFactionId}
+                          onChange={(e) => setAttachFactionId(e.target.value)}
+                          className="flex-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                        >
+                          <option value="">Join an existing faction/guild...</option>
+                          {availableFactions.map((f) => (
+                            <option key={f.id} value={f.id}>{f.name}</option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={handleAttachFaction}
+                          disabled={!attachFactionId}
+                          className="flex items-center gap-1 rounded-lg bg-[var(--accent-light)] px-3 py-2 text-xs font-semibold text-[var(--accent)] border border-[var(--border-subtle)] hover:bg-[var(--accent)] hover:text-white transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          <LinkIcon className="h-3.5 w-3.5" />
+                          <span>Join</span>
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {attachedFactions.length > 0 ? (
+                        attachedFactions.map((f) => (
+                          <div
+                            key={f.id}
+                            className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)] p-4 space-y-2"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <h4 className="font-prose text-sm font-bold text-[var(--text-main)] truncate">
+                                  {f.name}
+                                </h4>
+                                {f.alignment && (
+                                  <span className="inline-block rounded-md bg-[var(--accent-light)] px-2 py-0.5 text-[10px] font-bold text-[var(--accent)] border border-[var(--border-subtle)] mt-0.5">
+                                    {f.alignment}
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => handleDetachFaction(f.id)}
+                                className="p-1.5 rounded-lg text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500 transition-colors shrink-0"
+                                title="Leave faction"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                            {f.description && (
+                              <p className="text-xs text-[var(--text-muted)] leading-relaxed line-clamp-2">
+                                <EntityReferenceText text={f.description} refs={entityRefs} />
+                              </p>
+                            )}
+                            {f.leader && (
+                              <div className="text-[10px] text-[var(--text-dim)]">
+                                Leader: <span className="font-semibold text-[var(--text-main)]">{f.leader}</span>
+                              </div>
+                            )}
+                            <div className="text-[10px] text-[var(--text-dim)] flex items-center gap-1">
+                              <Users className="h-3 w-3" />
+                              {f.member_ids?.length ?? 0} member{(f.member_ids?.length ?? 0) === 1 ? '' : 's'}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="col-span-full p-4 text-center text-xs italic text-[var(--text-dim)] border-2 border-dashed border-[var(--border-color)] rounded-xl">
+                          Not part of any faction or guild. Join one above or create it in the Worldbuilding Hub (Factions &amp; Guilds).
                         </div>
                       )}
                     </div>

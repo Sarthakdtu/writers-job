@@ -334,6 +334,14 @@ def update_chapter(story_id: str, book_id: str, ch_id: str, chapter: Chapter):
     return file_manager.save_chapter(story_id, book_id, chapter)
 
 
+@app.delete("/api/stories/{story_id}/books/{book_id}/chapters/{ch_id}/art", response_model=Chapter)
+def remove_chapter_art(story_id: str, book_id: str, ch_id: str):
+    ch = file_manager.clear_chapter_image_url(story_id, book_id, ch_id)
+    if not ch:
+        raise HTTPException(status_code=404, detail=f"Chapter '{ch_id}' not found")
+    return ch
+
+
 @app.delete("/api/stories/{story_id}/books/{book_id}/chapters/{ch_id}")
 def delete_chapter(story_id: str, book_id: str, ch_id: str):
     success = file_manager.delete_chapter(story_id, book_id, ch_id)

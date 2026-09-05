@@ -47,14 +47,20 @@ export const WorldbuildingView = () => {
   const [gallerySearch, setGallerySearch] = useState('');
   const [library, setLibrary] = useState([]);
 
+  // Mechanics ("abilities") filters + detail modal
+  const [magicFilter, setMagicFilter] = useState('');
+  const [techFilter, setTechFilter] = useState('');
+  const [detailMechanic, setDetailMechanic] = useState(null);
+  const [showCharPicker, setShowCharPicker] = useState(false);
+
   // Entity references (@-mention picker + rich rendering in descriptions)
   const [entityRefs, setEntityRefs] = useState([]);
   const entityMention = useEntityMention(entityRefs);
 
   // Form states for items
   const [cityForm, setCityForm] = useState({ id: '', name: '', region: '', atmosphere: '', image_url: '', key_locations: '' });
-  const [mechanicsForm, setMechanicsForm] = useState({ id: '', name: '', magic_system: '', technology_level: '', global_rules: '' });
-  const [factionForm, setFactionForm] = useState({ id: '', name: '', description: '', leader: '', alignment: '' });
+  const [mechanicsForm, setMechanicsForm] = useState({ id: '', name: '', image_url: '', magic_system: '', technology_level: '', global_rules: '' });
+  const [factionForm, setFactionForm] = useState({ id: '', name: '', description: '', leader: '', alignment: '', member_ids: [] });
   const [glossaryForm, setGlossaryForm] = useState({ id: '', term: '', definition: '', category: '' });
   const [galleryForm, setGalleryForm] = useState({ id: '', title: '', image_url: '', context: '', category: 'Concept Art', tags: '' });
 
@@ -120,6 +126,16 @@ export const WorldbuildingView = () => {
       return haystack.includes(q);
     });
   })();
+
+  // Mechanics ("abilities") — filter options and filtered list
+  const mechanicsList = Array.isArray(data) ? data : [];
+  const magicOptions = [...new Set(mechanicsList.map((m) => m.magic_system).filter(Boolean))];
+  const techOptions = [...new Set(mechanicsList.map((m) => m.technology_level).filter(Boolean))];
+  const filteredMechanics = mechanicsList.filter(
+    (m) =>
+      (!magicFilter || m.magic_system === magicFilter) &&
+      (!techFilter || m.technology_level === techFilter)
+  );
 
   useEffect(() => {
     if (!activeStory) return;
@@ -213,6 +229,53 @@ export const WorldbuildingView = () => {
     setCharacters(updatedLocal);
   };
 
+  // Sync which characters possess an ability by updating each character's mechanic_ids
+  const syncMechanicCharacters = async (mechanicId, selected) => {
+    const affected = characters.filter((c) => {
+      const has = (c.mechanic_ids || []).includes(mechanicId);
+      const want = selected.includes(c.id);
+      return has !== want;
+    });
+
+    let updatedLocal = [...characters];
+    for (const char of affected) {
+      const want = selected.includes(char.id);
+      const mechanicIds = want
+        ? [...new Set([...(char.mechanic_ids || []), mechanicId])]
+        : (char.mechanic_ids || []).filter((id) => id !== mechanicId);
+      const updatedChar = { ...char, mechanic_ids: mechanicIds };
+      updatedLocal = updatedLocal.map((c) => (c.id === updatedChar.id ? updatedChar : c));
+      try {
+        await fetch(`/api/stories/${activeStory.id}/characters`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedChar),
+        });
+      } catch (err) {
+        console.error('Failed to sync character mechanic link:', err);
+      }
+    }
+    setCharacters(updatedLocal);
+  };
+
+  const toggleMechanicCharacter = (charId) => {
+    if (!detailMechanic) return;
+    const selected = new Set(
+      characters
+        .filter((c) => (c.mechanic_ids || []).includes(detailMechanic.id))
+        .map((c) => c.id)
+    );
+    if (selected.has(charId)) {
+      selected.delete(charId);
+    } else {
+      selected.add(charId);
+    }
+    syncMechanicCharacters(detailMechanic.id, [...selected]);
+  };
+
+  const mechanicCharacters = (mechId) =>
+    characters.filter((c) => (c.mechanic_ids || []).includes(mechId));
+
   // Persist an artifact (create or edit) into the story artifact section, then sync owners
   const handleSaveArtifact = async (artifact) => {
     if (!activeStory) return;
@@ -255,6 +318,8 @@ export const WorldbuildingView = () => {
         const data = await res.json();
         if (activeSection === 'cities') {
           setCityForm((prev) => ({ ...prev, image_url: data.url }));
+        } else if (activeSection === 'mechanics') {
+          setMechanicsForm((prev) => ({ ...prev, image_url: data.url }));
         } else {
           setGalleryForm((prev) => ({ ...prev, image_url: data.url }));
         }
@@ -306,9 +371,43 @@ export const WorldbuildingView = () => {
       description: factionForm.description,
       leader: factionForm.leader,
       alignment: factionForm.alignment,
+      member_ids: factionForm.member_ids || [],
     };
     const current = Array.isArray(data) ? data : [];
     const updated = [...current.filter((item) => item.id !== newItem.id), newItem];
+    saveSectionData(updated);
+  };
+
+  // Open the faction form pre-filled for editing
+  const handleEditFaction = (fac) => {
+    setFactionForm({
+      id: fac.id,
+      name: fac.name,
+      description: fac.description || '',
+      leader: fac.leader || '',
+      alignment: fac.alignment || '',
+      member_ids: fac.member_ids || [],
+    });
+    setShowItemModal(true);
+  };
+
+  // Toggle a character's membership while editing the faction form
+  const toggleFactionMember = (charId) => {
+    setFactionForm((f) => {
+      const set = new Set(f.member_ids || []);
+      if (set.has(charId)) set.delete(charId);
+      else set.add(charId);
+      return { ...f, member_ids: [...set] };
+    });
+  };
+
+  // Remove a character from a faction directly from its card
+  const removeFactionMember = (fac, charId) => {
+    const member = characters.find((c) => c.id === charId);
+    if (!confirm(`Remove ${member?.name || 'this character'} from ${fac.name}?`)) return;
+    const updatedFac = { ...fac, member_ids: (fac.member_ids || []).filter((id) => id !== charId) };
+    const current = Array.isArray(data) ? data : [];
+    const updated = current.map((item) => (item.id === fac.id ? updatedFac : item));
     saveSectionData(updated);
   };
 
@@ -359,6 +458,7 @@ export const WorldbuildingView = () => {
     const newItem = {
       id: mechanicsForm.id || (mechanicsForm.name || mechanicsForm.magic_system || 'mechanics').toLowerCase().replace(/[^a-z0-9]+/g, '-'),
       name: mechanicsForm.name,
+      image_url: mechanicsForm.image_url || '',
       magic_system: mechanicsForm.magic_system,
       technology_level: mechanicsForm.technology_level,
       global_rules: rules,
@@ -373,11 +473,14 @@ export const WorldbuildingView = () => {
     setMechanicsForm({
       id: mech.id || '',
       name: mech.name || '',
+      image_url: mech.image_url || '',
       magic_system: mech.magic_system || '',
       technology_level: mech.technology_level || '',
       global_rules: (mech.global_rules || []).join('\n'),
     });
+    setImageSourceMode(mech.image_url?.startsWith('/api/stories/') ? 'upload' : 'url');
     setShowItemModal(true);
+    setDetailMechanic(null);
   };
 
   if (!activeStory) {
@@ -414,10 +517,10 @@ export const WorldbuildingView = () => {
                 return;
               }
               setCityForm({ id: '', name: '', region: '', atmosphere: '', image_url: '', key_locations: '' });
-              setFactionForm({ id: '', name: '', description: '', leader: '', alignment: '' });
+              setFactionForm({ id: '', name: '', description: '', leader: '', alignment: '', member_ids: [] });
               setGlossaryForm({ id: '', term: '', definition: '', category: 'General' });
               setGalleryForm({ id: '', title: '', image_url: '', context: '', category: 'Concept Art', tags: '' });
-              setMechanicsForm({ id: '', name: '', magic_system: '', technology_level: '', global_rules: '' });
+              setMechanicsForm({ id: '', name: '', image_url: '', magic_system: '', technology_level: '', global_rules: '' });
               setImageSourceMode('upload');
               setShowItemModal(true);
             }}
@@ -536,88 +639,153 @@ export const WorldbuildingView = () => {
 
         {/* 2. MAGIC & MECHANICS TAB */}
         {activeSection === 'mechanics' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {Array.isArray(data) && data.length > 0 ? (
-              data.map((mech, idx) => (
-                <div key={mech.id || idx} className="literary-card rounded-2xl p-5 space-y-3 relative">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Zap className="h-4 w-4 text-[var(--accent)] shrink-0" />
-                      <h3 className="font-prose text-lg font-bold text-[var(--text-main)] truncate">
-                        {mech.name || mech.magic_system || 'World Mechanics'}
-                      </h3>
-                    </div>
+          <div className="space-y-4">
+            {/* Filter bar */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-wrap">
+              <select
+                value={magicFilter}
+                onChange={(e) => setMagicFilter(e.target.value)}
+                className={`rounded-xl border bg-[var(--bg-card)] px-3 py-2.5 text-xs cursor-pointer ${
+                  magicFilter
+                    ? 'border-[var(--accent)] text-[var(--accent)] font-semibold'
+                    : 'border-[var(--border-color)] text-[var(--text-muted)]'
+                } focus:outline-hidden`}
+              >
+                <option value="">All Magic Systems</option>
+                {magicOptions.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+              <select
+                value={techFilter}
+                onChange={(e) => setTechFilter(e.target.value)}
+                className={`rounded-xl border bg-[var(--bg-card)] px-3 py-2.5 text-xs cursor-pointer ${
+                  techFilter
+                    ? 'border-[var(--accent)] text-[var(--accent)] font-semibold'
+                    : 'border-[var(--border-color)] text-[var(--text-muted)]'
+                } focus:outline-hidden`}
+              >
+                <option value="">All Technology Levels</option>
+                {techOptions.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+              {(magicFilter || techFilter) && (
+                <button
+                  onClick={() => { setMagicFilter(''); setTechFilter(''); }}
+                  className="flex items-center gap-1.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border-color)] px-3 py-2.5 text-xs font-semibold text-[var(--text-muted)] hover:text-red-500 hover:border-red-500/40 transition-colors cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Clear Filters
+                </button>
+              )}
+              <span className="text-xs text-[var(--text-muted)] sm:ml-auto shrink-0">
+                {filteredMechanics.length} of {mechanicsList.length} abilit{mechanicsList.length === 1 ? 'y' : 'ies'}
+              </span>
+            </div>
+
+            {mechanicsList.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {filteredMechanics.length > 0 ? (
+                  filteredMechanics.map((mech, idx) => (
                     <button
-                      onClick={() => handleDeleteItem(mech.id)}
-                      className="p-1.5 rounded-lg text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500 transition-colors shrink-0"
-                      title="Delete Mechanics"
+                      key={mech.id || idx}
+                      onClick={() => setDetailMechanic(mech)}
+                      className="literary-card rounded-xl p-4 text-left space-y-2 relative group hover:border-[var(--accent)] hover:shadow-lg transition-all cursor-pointer"
+                      title="View details"
                     >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        {mech.image_url ? (
+                          <img
+                            src={mech.image_url}
+                            alt={mech.name || mech.magic_system || 'Ability'}
+                            className="h-9 w-9 rounded-lg object-cover border border-[var(--border-subtle)] shrink-0"
+                          />
+                        ) : (
+                          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent-light)] text-[var(--accent)] shrink-0">
+                            <Zap className="h-4 w-4" />
+                          </span>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-prose text-sm font-bold text-[var(--text-main)] truncate leading-snug">
+                            {mech.name || mech.magic_system || 'Untitled Ability'}
+                          </h3>
+                          <span className="text-[10px] font-semibold text-[var(--accent)] font-mono">
+                            {(mech.global_rules || []).length} rule{(mech.global_rules || []).length === 1 ? '' : 's'}
+                          </span>
+                        </div>
+                      </div>
 
-                  {mech.magic_system && (
-                    <div className="border-t border-[var(--border-subtle)] pt-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-dim)]">Magic System</span>
-                      <p className="text-xs text-[var(--text-main)] mt-0.5">{mech.magic_system}</p>
-                    </div>
-                  )}
+                      <div className="flex flex-wrap gap-1">
+                        {mech.magic_system && (
+                          <span className="rounded-md bg-[var(--bg-base)] px-2 py-0.5 text-[10px] font-semibold text-[var(--text-muted)] border border-[var(--border-subtle)] truncate max-w-full">
+                            <Sparkles className="h-2.5 w-2.5 inline mr-1 text-[var(--accent)]" />
+                            {mech.magic_system}
+                          </span>
+                        )}
+                        {mech.technology_level && (
+                          <span className="rounded-md bg-[var(--bg-base)] px-2 py-0.5 text-[10px] font-semibold text-[var(--text-muted)] border border-[var(--border-subtle)] truncate max-w-full">
+                            <Upload className="h-2.5 w-2.5 inline mr-1 text-[var(--text-dim)] rotate-90" />
+                            {mech.technology_level}
+                          </span>
+                        )}
+                      </div>
 
-                  {mech.technology_level && (
-                    <div className="border-t border-[var(--border-subtle)] pt-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-dim)]">Technology Level</span>
-                      <p className="text-xs text-[var(--text-main)] mt-0.5">{mech.technology_level}</p>
-                    </div>
-                  )}
-
-                  {(mech.global_rules || []).length > 0 && (
-                    <div className="border-t border-[var(--border-subtle)] pt-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-dim)]">Global Rules & Limitations</span>
-                      <ul className="mt-1 space-y-1">
-                        {(mech.global_rules || []).map((rule, i) => (
-                          <li key={i} className="flex items-start gap-1.5 text-xs text-[var(--text-muted)]">
-                            <span className="text-[var(--accent)] mt-0.5">•</span>
-                            <span>{rule}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {characters.some((c) => (c.mechanic_ids || []).includes(mech.id)) && (
-                    <div className="border-t border-[var(--border-subtle)] pt-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-dim)]">Characters with this Power</span>
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {characters
-                          .filter((c) => (c.mechanic_ids || []).includes(mech.id))
-                          .map((c) => (
+                      {mechanicCharacters(mech.id).length > 0 && (
+                        <div className="flex items-center -space-x-2 pt-0.5">
+                          {mechanicCharacters(mech.id).slice(0, 3).map((c) => (
                             <span
                               key={c.id}
-                              className="inline-flex items-center gap-1 rounded-md bg-[var(--accent-light)] px-2 py-0.5 text-[11px] font-semibold text-[var(--accent)] border border-[var(--border-subtle)]"
+                              title={c.name}
+                              className="h-7 w-7 rounded-full border-2 border-[var(--bg-card)] overflow-hidden bg-[var(--accent)] flex items-center justify-center"
                             >
                               {c.image_url ? (
-                                <img src={c.image_url} alt={c.name} className="h-3.5 w-3.5 rounded-full object-cover" />
+                                <img src={c.image_url} alt={c.name} className="h-full w-full object-cover" />
                               ) : (
-                                <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[var(--accent)] text-[8px] font-bold text-white">
+                                <span className="text-[10px] font-bold text-white">
                                   {(c.name || '?').charAt(0).toUpperCase()}
                                 </span>
                               )}
-                              {c.name}
                             </span>
                           ))}
-                      </div>
-                    </div>
-                  )}
+                          {mechanicCharacters(mech.id).length > 3 && (
+                            <span className="relative z-10 flex h-7 w-7 items-center justify-center rounded-full border-2 border-[var(--bg-card)] bg-[var(--bg-base)] text-[9px] font-bold text-[var(--accent)]">
+                              +{mechanicCharacters(mech.id).length - 3}
+                            </span>
+                          )}
+                        </div>
+                      )}
 
-                  <button
-                    onClick={() => handleEditMechanics(mech)}
-                    className="mt-1 flex items-center gap-1.5 rounded-lg bg-[var(--accent-light)] px-3 py-1.5 text-[11px] font-semibold text-[var(--accent)] border border-[var(--border-subtle)] hover:bg-[var(--accent)] hover:text-white transition-all cursor-pointer"
-                  >
-                    <Edit3 className="h-3 w-3" />
-                    Edit
-                  </button>
-                </div>
-              ))
+<div className="flex items-center gap-1 pt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); handleEditMechanics(mech); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); handleEditMechanics(mech); } }}
+                          className="flex items-center gap-1 rounded-md bg-[var(--accent-light)] px-2 py-1 text-[10px] font-semibold text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white transition-colors cursor-pointer"
+                        >
+                          <Edit3 className="h-3 w-3" />
+                          Edit
+                        </span>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); handleDeleteItem(mech.id); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); handleDeleteItem(mech.id); } }}
+                          className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-semibold text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500 transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          Delete
+                        </span>
+                      </div>
+                    </button>
+                  ))
+                ) : (
+                  <div className="col-span-full p-10 literary-card rounded-2xl text-center text-xs text-[var(--text-muted)]">
+                    No abilities match the selected filters.
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="col-span-full p-12 literary-card rounded-2xl text-center text-xs text-[var(--text-muted)]">
                 No world mechanics defined yet. Click 'Add New Entry' to create a magic system, technology, or universal rules.
@@ -643,18 +811,84 @@ export const WorldbuildingView = () => {
                         </span>
                       )}
                     </div>
-                    <button
-                      onClick={() => handleDeleteItem(fac.id)}
-                      className="p-1.5 rounded-lg text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500 transition-colors"
-                      title="Delete Faction"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleEditFaction(fac)}
+                        className="p-1.5 rounded-lg text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] transition-colors"
+                        title="Edit Faction"
+                      >
+                        <Edit3 className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteItem(fac.id)}
+                        className="p-1.5 rounded-lg text-[var(--text-dim)] hover:bg-red-500/10 hover:text-red-500 transition-colors"
+                        title="Delete Faction"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
 
                   <p className="text-xs text-[var(--text-muted)] leading-relaxed">
                     <EntityReferenceText text={fac.description} refs={entityRefs} />
                   </p>
+
+                  {/* Members — overlapping avatar stack */}
+                  {(fac.member_ids || []).length > 0 ? (
+                    <div className="border-t border-[var(--border-subtle)] pt-2 space-y-1.5">
+                      <div className="text-[10px] font-bold uppercase text-[var(--text-dim)] flex items-center gap-1">
+                        <Users className="h-3 w-3" />
+                        Members ({fac.member_ids.length})
+                      </div>
+                      <div className="flex items-center">
+                        <div className="flex -space-x-2">
+                          {fac.member_ids.slice(0, 3).map((charId) => {
+                            const member = characters.find((c) => c.id === charId);
+                            return (
+                              <button
+                                key={charId}
+                                onClick={() => removeFactionMember(fac, charId)}
+                                title={member ? `Remove ${member.name}` : 'Unknown member'}
+                                className="relative h-8 w-8 rounded-full border-2 border-[var(--bg-card)] overflow-hidden bg-[var(--accent-light)] hover:ring-2 hover:ring-red-500/60 transition-all cursor-pointer"
+                              >
+                                {member?.image_url ? (
+                                  <img src={member.image_url} alt={member?.name || charId} className="h-full w-full object-cover" />
+                                ) : (
+                                  <span className="flex h-full w-full items-center justify-center text-[11px] font-bold text-[var(--accent)]">
+                                    {(member?.name || charId).charAt(0).toUpperCase()}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {fac.member_ids.length > 3 && (
+                          <span className="ml-2 rounded-full bg-[var(--bg-base)] border border-[var(--border-subtle)] px-2 py-0.5 text-[10px] font-semibold text-[var(--text-muted)]">
+                            +{fac.member_ids.length - 3}
+                          </span>
+                        )}
+                        <button
+                          onClick={() => handleEditFaction(fac)}
+                          className="ml-2 flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-[var(--accent)] hover:bg-[var(--accent-light)] transition-colors cursor-pointer"
+                          title="Edit members"
+                        >
+                          <Plus className="h-3 w-3" />
+                          Edit
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="border-t border-[var(--border-subtle)] pt-2">
+                      <button
+                        onClick={() => handleEditFaction(fac)}
+                        className="flex items-center gap-1 text-[10px] font-semibold text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors cursor-pointer"
+                        title="Attach characters"
+                      >
+                        <Users className="h-3 w-3" />
+                        Attach Characters
+                      </button>
+                    </div>
+                  )}
 
                   {fac.leader && (
                     <div className="border-t border-[var(--border-subtle)] pt-2 text-xs text-[var(--text-dim)]">
@@ -965,6 +1199,8 @@ export const WorldbuildingView = () => {
                 ? cityForm.id ? 'Edit City/Location' : 'Add City/Location'
                 : activeSection === 'mechanics'
                 ? mechanicsForm.id ? 'Edit World Mechanics' : 'Add World Mechanics'
+                : activeSection === 'factions'
+                ? factionForm.id ? 'Edit Faction/Guild' : 'Add Faction/Guild'
                 : activeSection === 'gallery'
                 ? 'Add Gallery Artwork'
                 : 'Add ' + activeSection.substring(0, 1).toUpperCase() + activeSection.substring(1) + ' Entry'}
@@ -1179,6 +1415,43 @@ export const WorldbuildingView = () => {
                     placeholder="Guarding the ancient runes and controlling trade... Type @ to reference a character, place, faction, artifact or glossary term."
                     className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
                   />
+                </div>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)]">
+                    <Users className="h-3.5 w-3.5" />
+                    <span>Members ({factionForm.member_ids?.length || 0} character{factionForm.member_ids?.length === 1 ? '' : 's'})</span>
+                  </label>
+                  <div className="border border-[var(--border-color)] rounded-xl bg-[var(--bg-base)] p-3 space-y-1.5 max-h-40 overflow-y-auto">
+                    {characters.length === 0 ? (
+                      <p className="text-[11px] italic text-[var(--text-dim)]">
+                        No characters exist yet. Create character profiles first.
+                      </p>
+                    ) : (
+                      characters.map((char) => {
+                        const checked = (factionForm.member_ids || []).includes(char.id);
+                        return (
+                          <label
+                            key={char.id}
+                            className="flex items-center gap-2 cursor-pointer text-xs text-[var(--text-main)] p-1.5 rounded-lg hover:bg-[var(--bg-hover)] transition-colors"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleFactionMember(char.id)}
+                              className="accent-[var(--accent)] h-3.5 w-3.5"
+                            />
+                            <img
+                              src={char.image_url || ''}
+                              alt=""
+                              className={`h-6 w-6 rounded-full object-cover border border-[var(--border-subtle)] ${char.image_url ? '' : 'hidden'}`}
+                              onError={(e) => { e.currentTarget.classList.add('hidden'); }}
+                            />
+                            <span className="font-semibold">{char.name}</span>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
                   <button
@@ -1472,6 +1745,88 @@ export const WorldbuildingView = () => {
                     className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden font-mono"
                   />
                 </div>
+
+                {/* Ability Image */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-semibold text-[var(--text-muted)]">
+                      Ability Image
+                    </label>
+                    <div className="flex items-center gap-1 bg-[var(--bg-base)] p-0.5 rounded-lg border border-[var(--border-subtle)]">
+                      <button
+                        type="button"
+                        onClick={() => setImageSourceMode('upload')}
+                        className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold transition-all cursor-pointer ${
+                          imageSourceMode === 'upload'
+                            ? 'bg-[var(--accent)] text-white'
+                            : 'text-[var(--text-muted)]'
+                        }`}
+                      >
+                        <Upload className="h-3 w-3" />
+                        <span>Upload File</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setImageSourceMode('url')}
+                        className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold transition-all cursor-pointer ${
+                          imageSourceMode === 'url'
+                            ? 'bg-[var(--accent)] text-white'
+                            : 'text-[var(--text-muted)]'
+                        }`}
+                      >
+                        <LinkIcon className="h-3 w-3" />
+                        <span>URL Link</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {imageSourceMode === 'upload' ? (
+                    <div className="border-2 border-dashed border-[var(--border-color)] rounded-xl p-3 bg-[var(--bg-base)] text-center space-y-2">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                        id="mechanics-image-file-input"
+                      />
+                      <label
+                        htmlFor="mechanics-image-file-input"
+                        className="cursor-pointer inline-flex items-center gap-2 rounded-lg bg-[var(--accent-light)] px-3 py-1.5 text-xs font-semibold text-[var(--accent)] border border-[var(--border-subtle)] hover:bg-[var(--accent)] hover:text-white transition-all"
+                      >
+                        <Upload className="h-3.5 w-3.5" />
+                        <span>{uploading ? 'Uploading...' : 'Choose Image File from Computer'}</span>
+                      </label>
+                      <p className="text-[10px] text-[var(--text-dim)]">
+                        Saves asset locally inside `/data/stories/${activeStory.id}/assets/`
+                      </p>
+                    </div>
+                  ) : (
+                    <input
+                      type="url"
+                      value={mechanicsForm.image_url}
+                      onChange={(e) => setMechanicsForm({ ...mechanicsForm, image_url: e.target.value })}
+                      placeholder="https://images.unsplash.com/photo-..."
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-base)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent)] focus:outline-hidden"
+                    />
+                  )}
+
+                  {mechanicsForm.image_url && (
+                    <div className="flex items-center gap-3 p-2 rounded-lg bg-[var(--bg-base)] border border-[var(--border-subtle)]">
+                      <img src={mechanicsForm.image_url} alt="Preview" className="h-10 w-10 rounded-lg object-cover border border-[var(--accent)]" />
+                      <div className="flex-1 truncate text-[11px] font-mono text-[var(--text-muted)]">
+                        {mechanicsForm.image_url}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setMechanicsForm({ ...mechanicsForm, image_url: '' })}
+                        className="text-red-500 p-1 hover:bg-red-500/10 rounded-md"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex justify-end gap-2 pt-2">
                   <button
                     type="button"
@@ -1506,6 +1861,188 @@ export const WorldbuildingView = () => {
           }}
           onSubmit={handleSaveArtifact}
         />
+      )}
+
+      {/* Ability Detail Modal */}
+      {detailMechanic && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in"
+          onClick={() => { setDetailMechanic(null); setShowCharPicker(false); }}
+        >
+          <div
+            className="w-full max-w-lg rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] shadow-2xl overflow-hidden animate-in zoom-in-95"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {detailMechanic.image_url && (
+              <div className="relative h-56 w-full bg-[var(--bg-base)] border-b border-[var(--border-subtle)]">
+                <img
+                  src={detailMechanic.image_url}
+                  alt={detailMechanic.name || detailMechanic.magic_system || 'Ability'}
+                  className="h-full w-full object-cover"
+                />
+              </div>
+            )}
+            <div className="p-6 space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-prose text-xl font-bold text-[var(--text-main)]">
+                    {detailMechanic.name || detailMechanic.magic_system || 'Untitled Ability'}
+                  </h3>
+                  {!detailMechanic.image_url && (
+                    <span className="inline-flex items-center gap-1 mt-1 rounded-md bg-[var(--accent-light)] px-2 py-0.5 text-[10px] font-bold text-[var(--accent)]">
+                      <Zap className="h-3 w-3" />
+                      World Ability
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={() => { setDetailMechanic(null); setShowCharPicker(false); }}
+                  className="p-1.5 rounded-lg text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)] transition-colors cursor-pointer"
+                  title="Close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {detailMechanic.magic_system && (
+                <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-dim)] flex items-center gap-1">
+                    <Sparkles className="h-3 w-3 text-[var(--accent)]" />
+                    Magic System / Energy Source
+                  </span>
+                  <p className="text-sm text-[var(--text-main)] mt-1">{detailMechanic.magic_system}</p>
+                </div>
+              )}
+
+              {detailMechanic.technology_level && (
+                <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-dim)] flex items-center gap-1">
+                    <Upload className="h-3 w-3 rotate-90" />
+                    Technology Level
+                  </span>
+                  <p className="text-sm text-[var(--text-main)] mt-1">{detailMechanic.technology_level}</p>
+                </div>
+              )}
+
+              {(detailMechanic.global_rules || []).length > 0 && (
+                <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-dim)]">
+                    Global Rules & Limitations
+                  </span>
+                  <ul className="mt-1.5 space-y-1.5">
+                    {(detailMechanic.global_rules || []).map((rule, i) => (
+                      <li key={i} className="flex items-start gap-2 text-xs text-[var(--text-muted)] leading-relaxed">
+                        <span className="text-[var(--accent)] mt-0.5">•</span>
+                        <span>{rule}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)] p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-dim)] flex items-center gap-1">
+                      <Users className="h-3 w-3" />
+                      Characters with this Power ({mechanicCharacters(detailMechanic.id).length})
+                    </span>
+                    <button
+                      onClick={() => setShowCharPicker((v) => !v)}
+                      className="flex items-center gap-1 rounded-md bg-[var(--accent-light)] px-2 py-0.5 text-[10px] font-bold text-[var(--accent)] border border-[var(--border-subtle)] hover:bg-[var(--accent)] hover:text-white transition-all cursor-pointer"
+                    >
+                      <Plus className="h-3 w-3" />
+                      <span>{showCharPicker ? 'Done' : 'Add / Remove'}</span>
+                    </button>
+                  </div>
+
+                  {showCharPicker ? (
+                    <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+                      {characters.length === 0 ? (
+                        <p className="text-[11px] italic text-[var(--text-dim)]">
+                          No characters exist yet. Create character profiles first.
+                        </p>
+                      ) : (
+                        characters.map((char) => {
+                          const checked = mechanicCharacters(detailMechanic.id).some((c) => c.id === char.id);
+                          return (
+                            <label
+                              key={char.id}
+                              className="flex items-center gap-2 cursor-pointer text-xs text-[var(--text-main)] p-1.5 rounded-lg hover:bg-[var(--bg-hover)] transition-colors"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleMechanicCharacter(char.id)}
+                                className="accent-[var(--accent)] h-3.5 w-3.5"
+                              />
+                              {char.image_url ? (
+                                <img src={char.image_url} alt="" className="h-6 w-6 rounded-full object-cover border border-[var(--border-subtle)]" />
+                              ) : (
+                                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent)] text-[10px] font-bold text-white">
+                                  {(char.name || '?').charAt(0).toUpperCase()}
+                                </span>
+                              )}
+                              <span className="font-semibold">{char.name}</span>
+                            </label>
+                          );
+                        })
+                      )}
+                    </div>
+                  ) : mechanicCharacters(detailMechanic.id).length > 0 ? (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {mechanicCharacters(detailMechanic.id).map((c) => (
+                        <span
+                          key={c.id}
+                          title={c.name}
+                          className="relative group/avatar cursor-pointer"
+                          onClick={() => toggleMechanicCharacter(c.id)}
+                        >
+                          {c.image_url ? (
+                            <img
+                              src={c.image_url}
+                              alt={c.name}
+                              className="h-9 w-9 rounded-full object-cover border-2 border-[var(--border-color)] transition-transform group-hover/avatar:scale-105"
+                            />
+                          ) : (
+                            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--accent)] text-xs font-bold text-white">
+                              {(c.name || '?').charAt(0).toUpperCase()}
+                            </span>
+                          )}
+                          <span className="absolute -top-1 -right-1 hidden group-hover/avatar:flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white">
+                            <X className="h-2.5 w-2.5" />
+                          </span>
+                          <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 hidden group-hover/avatar:block whitespace-nowrap rounded-md bg-black/80 px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                            {c.name} · click to remove
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-[11px] italic text-[var(--text-dim)]">
+                      No characters possess this ability yet. Click "Add / Remove" to link characters. Changes reflect on their profiles automatically.
+                    </p>
+                  )}
+                </div>
+
+              <div className="flex items-center gap-2 border-t border-[var(--border-subtle)] pt-4">
+                <button
+                  onClick={() => handleEditMechanics(detailMechanic)}
+                  className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-white hover:bg-[var(--accent-hover)] transition-colors cursor-pointer"
+                >
+                  <Edit3 className="h-3.5 w-3.5" />
+                  Edit Ability
+                </button>
+                <button
+                  onClick={() => { setDetailMechanic(null); handleDeleteItem(detailMechanic.id); }}
+                  className="flex items-center justify-center gap-1.5 rounded-lg bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-500 hover:bg-red-500 hover:text-white transition-colors cursor-pointer"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
